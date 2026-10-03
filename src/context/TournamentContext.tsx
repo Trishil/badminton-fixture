@@ -8,6 +8,8 @@ import {
   GroupId,
   TournamentSettings,
   KnockoutMode,
+  UserRole,
+  CloudSyncStatus,
 } from '../types/tournament';
 import { DEFAULT_TEAMS, PRO_PAIRS_PRESET, DEFAULT_SETTINGS } from '../utils/initialData';
 import { generateGroupMatches } from '../utils/scheduler';
@@ -26,6 +28,13 @@ import {
   playPodiumFanfare,
   unlockAudioContext,
 } from '../utils/audio';
+import {
+  subscribeToLiveTournament,
+  pushTournamentStateToCloud,
+  DEFAULT_COACH_KEY,
+  DEFAULT_SPECTATOR_KEY,
+  CloudTournamentPayload,
+} from '../services/firebase';
 
 interface CourtTimerHook {
   secondsRemaining: number;
@@ -73,6 +82,21 @@ interface TournamentContextType {
   toggleSound: () => void;
   resetTournament: () => void;
   importTournamentJSON: (jsonData: string) => boolean;
+
+  // Access Control & Role
+  userRole: UserRole;
+  isCoach: boolean;
+  coachKey: string;
+  spectatorKey: string;
+  showAuthModal: boolean;
+  setShowAuthModal: (show: boolean) => void;
+  unlockCoachMode: (key: string) => boolean;
+  lockCoachMode: () => void;
+  updateCoachKey: (newKey: string) => void;
+
+  // Real-time Cloud Sync
+  cloudSyncStatus: CloudSyncStatus;
+  triggerManualCloudSync: () => Promise<void>;
 
   // Celebration & Podium
   showPodiumModal: boolean;
@@ -125,6 +149,40 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const [activeTab, setActiveTab] = useState<'courts' | 'schedule' | 'standings' | 'knockout' | 'admin'>('courts');
   const [showPodiumModal, setShowPodiumModal] = useState<boolean>(false);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+
+  // Access Control State
+  const [coachKey, setCoachKey] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('smashflow_coach_key') || DEFAULT_COACH_KEY;
+    }
+    return DEFAULT_COACH_KEY;
+  });
+  const [spectatorKey, setSpectatorKey] = useState<string>(DEFAULT_SPECTATOR_KEY);
+
+  // Determine initial role: Check URL params first (?key=coach2026), then localStorage
+  const [userRole, setUserRole] = useState<UserRole>(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const keyFromUrl = urlParams.get('key');
+      const savedKey = localStorage.getItem('smashflow_coach_key') || DEFAULT_COACH_KEY;
+      if (keyFromUrl && keyFromUrl.trim().toLowerCase() === savedKey.trim().toLowerCase()) {
+        localStorage.setItem('smashflow_user_role', 'coach');
+        return 'coach';
+      }
+      const savedRole = localStorage.getItem('smashflow_user_role');
+      if (savedRole === 'coach') return 'coach';
+    }
+    return 'spectator';
+  });
+
+  const isCoach = userRole === 'coach';
+
+  // Cloud Sync State
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('synced');
+  const lastLocalUpdateTimestamp = useRef<number>(0);
+  const versionRef = useRef<number>(1);
+  const isIncomingRemoteUpdate = useRef<boolean>(false);
 
   // Court 1 Timer
   const [c1Seconds, setC1Seconds] = useState<number>(() => {
@@ -223,8 +281,98 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     saveTournamentToStorage(dataToSave);
   }, [teams, matches, knockoutMatches, settings, c1Seconds, c2Seconds]);
 
+  // Push local updates to Firestore cloud database
+  const syncToCloud = useCallback(
+    async (overrideData?: Partial<CloudTournamentPayload>) => {
+      setCloudSyncStatus('syncing');
+      const now = Date.now();
+      lastLocalUpdateTimestamp.current = now;
+      versionRef.current += 1;
+
+      const payload = {
+        teams: overrideData?.teams || teams,
+        matches: overrideData?.matches || matches,
+        knockoutMatches: overrideData?.knockoutMatches || knockoutMatches,
+        settings: overrideData?.settings || settings,
+        c1Seconds: overrideData?.c1Seconds ?? c1Seconds,
+        c2Seconds: overrideData?.c2Seconds ?? c2Seconds,
+        c1Running: overrideData?.c1Running ?? c1Running,
+        c2Running: overrideData?.c2Running ?? c2Running,
+        coachKey: overrideData?.coachKey || coachKey,
+        spectatorKey: overrideData?.spectatorKey || spectatorKey,
+        version: versionRef.current,
+      };
+
+      const ok = await pushTournamentStateToCloud(payload);
+      setCloudSyncStatus(ok ? 'synced' : 'offline');
+    },
+    [teams, matches, knockoutMatches, settings, c1Seconds, c2Seconds, c1Running, c2Running, coachKey, spectatorKey]
+  );
+
+  // Real-time Firestore Cloud Subscription (Listening to changes across all devices)
+  useEffect(() => {
+    const unsubscribe = subscribeToLiveTournament(
+      (cloudData) => {
+        // If this update came from another device and is newer than our last local update
+        if (cloudData.updatedAt && cloudData.updatedAt > lastLocalUpdateTimestamp.current) {
+          isIncomingRemoteUpdate.current = true;
+          lastLocalUpdateTimestamp.current = cloudData.updatedAt;
+          if (cloudData.version) versionRef.current = cloudData.version;
+
+          if (cloudData.teams) setTeams(cloudData.teams);
+          if (cloudData.matches) setMatches(cloudData.matches);
+          if (cloudData.knockoutMatches) setKnockoutMatches(cloudData.knockoutMatches);
+          if (cloudData.settings) setSettings(cloudData.settings);
+          if (typeof cloudData.c1Seconds === 'number') setC1Seconds(cloudData.c1Seconds);
+          if (typeof cloudData.c2Seconds === 'number') setC2Seconds(cloudData.c2Seconds);
+          if (typeof cloudData.c1Running === 'boolean') setC1Running(cloudData.c1Running);
+          if (typeof cloudData.c2Running === 'boolean') setC2Running(cloudData.c2Running);
+          if (cloudData.coachKey) setCoachKey(cloudData.coachKey);
+          if (cloudData.spectatorKey) setSpectatorKey(cloudData.spectatorKey);
+
+          setCloudSyncStatus('synced');
+          setTimeout(() => {
+            isIncomingRemoteUpdate.current = false;
+          }, 100);
+        }
+      },
+      (err) => {
+        console.warn('Firestore live listener offline or reconnecting:', err);
+        setCloudSyncStatus('offline');
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  // Access Control Helpers
+  const unlockCoachMode = useCallback((inputKey: string): boolean => {
+    if (inputKey.trim().toLowerCase() === coachKey.trim().toLowerCase()) {
+      setUserRole('coach');
+      localStorage.setItem('smashflow_user_role', 'coach');
+      return true;
+    }
+    return false;
+  }, [coachKey]);
+
+  const lockCoachMode = useCallback(() => {
+    setUserRole('spectator');
+    localStorage.setItem('smashflow_user_role', 'spectator');
+  }, []);
+
+  const updateCoachKey = useCallback((newKey: string) => {
+    if (!newKey.trim()) return;
+    const cleanKey = newKey.trim();
+    setCoachKey(cleanKey);
+    localStorage.setItem('smashflow_coach_key', cleanKey);
+    syncToCloud({ coachKey: cleanKey });
+  }, [syncToCloud]);
+
+  const triggerManualCloudSync = useCallback(async () => {
+    await syncToCloud();
+  }, [syncToCloud]);
+
   // Determine Active Court Matches
-  // Court 1: First check if a knockout match is assigned & live on Court 1, else find live group match on Court 1
   const court1Match = useMemo(() => {
     const liveKo = knockoutMatches.find((m) => m.court === 1 && m.status === 'live');
     if (liveKo) return liveKo;
@@ -232,7 +380,6 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return liveGroup || null;
   }, [matches, knockoutMatches]);
 
-  // Court 1 "Up Next" match
   const court1UpNext = useMemo(() => {
     const scheduledKo = knockoutMatches.find(
       (m) => m.court === 1 && m.status === 'scheduled' && m.teamAId && m.teamBId
@@ -242,7 +389,6 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return scheduledGroup || null;
   }, [matches, knockoutMatches]);
 
-  // Court 2: Check knockout first, then group
   const court2Match = useMemo(() => {
     const liveKo = knockoutMatches.find((m) => m.court === 2 && m.status === 'live');
     if (liveKo) return liveKo;
@@ -250,7 +396,6 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return liveGroup || null;
   }, [matches, knockoutMatches]);
 
-  // Court 2 "Up Next" match
   const court2UpNext = useMemo(() => {
     const scheduledKo = knockoutMatches.find(
       (m) => m.court === 2 && m.status === 'scheduled' && m.teamAId && m.teamBId
@@ -265,17 +410,44 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     secondsRemaining: c1Seconds,
     isRunning: c1Running,
     start: () => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
       unlockAudioContext();
       c1WarningBeeped.current = c1Seconds <= 120;
       setC1Running(true);
+      syncToCloud({ c1Running: true, c1Seconds });
     },
-    pause: () => setC1Running(false),
+    pause: () => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
+      setC1Running(false);
+      syncToCloud({ c1Running: false, c1Seconds });
+    },
     reset: (sec = 420) => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
       setC1Running(false);
       c1WarningBeeped.current = false;
       setC1Seconds(sec);
+      syncToCloud({ c1Running: false, c1Seconds: sec });
     },
-    addMinute: () => setC1Seconds((prev) => prev + 60),
+    addMinute: () => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
+      setC1Seconds((prev) => {
+        const next = prev + 60;
+        syncToCloud({ c1Seconds: next });
+        return next;
+      });
+    },
   };
 
   // Court 2 Timer Hook controls
@@ -283,36 +455,70 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     secondsRemaining: c2Seconds,
     isRunning: c2Running,
     start: () => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
       unlockAudioContext();
       c2WarningBeeped.current = c2Seconds <= 120;
       setC2Running(true);
+      syncToCloud({ c2Running: true, c2Seconds });
     },
-    pause: () => setC2Running(false),
+    pause: () => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
+      setC2Running(false);
+      syncToCloud({ c2Running: false, c2Seconds });
+    },
     reset: (sec = 420) => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
       setC2Running(false);
       c2WarningBeeped.current = false;
       setC2Seconds(sec);
+      syncToCloud({ c2Running: false, c2Seconds: sec });
     },
-    addMinute: () => setC2Seconds((prev) => prev + 60),
+    addMinute: () => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
+      setC2Seconds((prev) => {
+        const next = prev + 60;
+        syncToCloud({ c2Seconds: next });
+        return next;
+      });
+    },
   };
 
   // Sound Toggle
   const toggleSound = useCallback(() => {
     unlockAudioContext();
-    setSettings((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }));
-  }, []);
+    setSettings((prev) => {
+      const next = { ...prev, soundEnabled: !prev.soundEnabled };
+      syncToCloud({ settings: next });
+      return next;
+    });
+  }, [syncToCloud]);
 
   // Update Score for a match
   const updateScore = useCallback(
     (matchId: string, team: 'A' | 'B', delta: number) => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
       unlockAudioContext();
 
-      // Check if it's a knockout match
       const isKo = knockoutMatches.some((m) => m.id === matchId);
 
       if (isKo) {
-        setKnockoutMatches((prev) =>
-          prev.map((m) => {
+        setKnockoutMatches((prev) => {
+          const next = prev.map((m) => {
             if (m.id !== matchId) return m;
             const newScoreA = team === 'A' ? Math.max(0, m.scoreA + delta) : m.scoreA;
             const newScoreB = team === 'B' ? Math.max(0, m.scoreB + delta) : m.scoreB;
@@ -338,12 +544,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               scoreB: newScoreB,
               winnerId,
             };
-          })
-        );
+          });
+          syncToCloud({ knockoutMatches: next });
+          return next;
+        });
       } else {
         // Group match
-        setMatches((prev) =>
-          prev.map((m) => {
+        setMatches((prev) => {
+          const next = prev.map((m) => {
             if (m.matchId !== matchId) return m;
             const newScoreA = team === 'A' ? Math.max(0, m.scoreA + delta) : m.scoreA;
             const newScoreB = team === 'B' ? Math.max(0, m.scoreB + delta) : m.scoreB;
@@ -369,24 +577,30 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               scoreB: newScoreB,
               winnerId,
             };
-          })
-        );
+          });
+          syncToCloud({ matches: next });
+          return next;
+        });
       }
     },
-    [knockoutMatches, settings.pointsToWin, settings.soundEnabled]
+    [isCoach, knockoutMatches, settings.pointsToWin, settings.soundEnabled, syncToCloud]
   );
 
   // Quick Finish match (auto-fill 5-3, 5-4, 5-1 etc)
   const quickFinishMatch = useCallback(
     (matchId: string, winnerId: string, winScore = 5, loseScore = 3) => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
       unlockAudioContext();
       playMatchPointChime(settings.soundEnabled);
 
       const isKo = knockoutMatches.some((m) => m.id === matchId);
 
       if (isKo) {
-        setKnockoutMatches((prev) =>
-          prev.map((m) => {
+        setKnockoutMatches((prev) => {
+          const next = prev.map((m) => {
             if (m.id !== matchId) return m;
             const isWinnerA = m.teamAId === winnerId;
             return {
@@ -395,11 +609,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               scoreB: isWinnerA ? loseScore : winScore,
               winnerId,
             };
-          })
-        );
+          });
+          syncToCloud({ knockoutMatches: next });
+          return next;
+        });
       } else {
-        setMatches((prev) =>
-          prev.map((m) => {
+        setMatches((prev) => {
+          const next = prev.map((m) => {
             if (m.matchId !== matchId) return m;
             const isWinnerA = m.teamA_id === winnerId;
             return {
@@ -408,307 +624,393 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               scoreB: isWinnerA ? loseScore : winScore,
               winnerId,
             };
-          })
-        );
+          });
+          syncToCloud({ matches: next });
+          return next;
+        });
       }
     },
-    [knockoutMatches, settings.soundEnabled]
+    [isCoach, knockoutMatches, settings.soundEnabled, syncToCloud]
   );
 
-  // Finish and Advance Match (frees court, automatically queues next match)
+  // Finish match, mark completed, and advance next queued match on that court
   const finishAndAdvanceMatch = useCallback(
     (matchId: string): { success: boolean; error?: string } => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return { success: false, error: 'Coach / Editor Access Required to finish matches' };
+      }
       unlockAudioContext();
 
-      // Check if knockout match
-      const koMatch = knockoutMatches.find((m) => m.id === matchId);
-      if (koMatch) {
-        if (koMatch.scoreA === koMatch.scoreB) {
-          return { success: false, error: 'Cannot finish match with tied score! Badminton requires a winner.' };
-        }
-        const winnerId = koMatch.scoreA > koMatch.scoreB ? koMatch.teamAId : koMatch.teamBId;
-        if (!winnerId) {
-          return { success: false, error: 'Winner could not be determined.' };
-        }
+      const isKo = knockoutMatches.some((m) => m.id === matchId);
 
-        const courtNum = koMatch.court;
+      if (isKo) {
+        const targetKo = knockoutMatches.find((m) => m.id === matchId);
+        if (!targetKo) return { success: false, error: 'Match not found' };
 
-        // If this is the Grand Final!
-        const isFinal = koMatch.id === 'final';
-
-        setKnockoutMatches((prev) =>
-          prev.map((m) => {
-            if (m.id !== matchId) return m;
-            return {
-              ...m,
-              status: 'completed',
-              winnerId,
-            };
-          })
-        );
-
-        if (courtNum === 1) {
-          court1Timer.reset(420);
-        } else {
-          court2Timer.reset(420);
+        if (targetKo.scoreA === targetKo.scoreB) {
+          return {
+            success: false,
+            error: 'Cannot complete tied match! Badminton requires a winner (sudden death at 4-4).',
+          };
         }
 
-        if (isFinal) {
-          // Trigger victory celebration!
-          playPodiumFanfare(settings.soundEnabled);
-          confetti({
-            particleCount: 120,
-            spread: 80,
-            origin: { y: 0.6 },
+        const winnerId = targetKo.scoreA > targetKo.scoreB ? targetKo.teamAId : targetKo.teamBId;
+        const courtNumber = targetKo.court;
+
+        let nextKoMatches: KnockoutMatch[] = [];
+        setKnockoutMatches((prev) => {
+          nextKoMatches = prev.map((m) => {
+            if (m.id === matchId) {
+              return {
+                ...m,
+                status: 'completed',
+                winnerId,
+              };
+            }
+            return m;
           });
-          setShowPodiumModal(true);
+
+          // If Grand Final was completed, celebration!
+          if (matchId === 'final' && winnerId) {
+            confetti({ particleCount: 200, spread: 100, origin: { y: 0.6 } });
+            playPodiumFanfare(settings.soundEnabled);
+            setShowPodiumModal(true);
+          }
+
+          // Advance next queued match on this court
+          const nextScheduledKo = nextKoMatches.find(
+            (m) => m.court === courtNumber && m.status === 'scheduled' && m.teamAId && m.teamBId
+          );
+          if (nextScheduledKo) {
+            nextKoMatches = nextKoMatches.map((m) =>
+              m.id === nextScheduledKo.id ? { ...m, status: 'live' } : m
+            );
+          }
+
+          syncToCloud({ knockoutMatches: nextKoMatches });
+          return nextKoMatches;
+        });
+
+        if (courtNumber === 1) court1Timer.reset(420);
+        if (courtNumber === 2) court2Timer.reset(420);
+
+        return { success: true };
+      } else {
+        // Group match
+        const targetGroup = matches.find((m) => m.matchId === matchId);
+        if (!targetGroup) return { success: false, error: 'Match not found' };
+
+        if (targetGroup.scoreA === targetGroup.scoreB) {
+          return {
+            success: false,
+            error: 'Cannot complete tied match! Badminton requires a winner (first to 5).',
+          };
         }
+
+        const winnerId = targetGroup.scoreA > targetGroup.scoreB ? targetGroup.teamA_id : targetGroup.teamB_id;
+        const courtNumber = targetGroup.court;
+
+        setMatches((prev) => {
+          let updatedMatches = prev.map((m) => {
+            if (m.matchId === matchId) {
+              return {
+                ...m,
+                status: 'completed' as const,
+                winnerId,
+                completedAt: Date.now(),
+              };
+            }
+            return m;
+          });
+
+          // Check if there are scheduled matches on this court
+          const nextScheduledGroup = updatedMatches.find(
+            (m) => m.court === courtNumber && m.status === 'scheduled'
+          );
+
+          if (nextScheduledGroup) {
+            updatedMatches = updatedMatches.map((m) =>
+              m.matchId === nextScheduledGroup.matchId
+                ? { ...m, status: 'live' as const, startedAt: Date.now() }
+                : m
+            );
+          }
+
+          syncToCloud({ matches: updatedMatches });
+          return updatedMatches;
+        });
+
+        // Reset the timer for that court to 7:00
+        if (courtNumber === 1) court1Timer.reset(420);
+        if (courtNumber === 2) court2Timer.reset(420);
 
         return { success: true };
       }
-
-      // Group match
-      const groupMatch = matches.find((m) => m.matchId === matchId);
-      if (!groupMatch) {
-        return { success: false, error: 'Match not found.' };
-      }
-
-      if (groupMatch.scoreA === groupMatch.scoreB) {
-        return {
-          success: false,
-          error: 'Scores are tied (sudden-death required: first to 5 points wins)!',
-        };
-      }
-
-      const winnerId = groupMatch.scoreA > groupMatch.scoreB ? groupMatch.teamA_id : groupMatch.teamB_id;
-      const courtNum = groupMatch.court;
-
-      // Mark this match completed, and find next scheduled match on this court to promote to live
-      setMatches((prev) => {
-        let promotedNext = false;
-        return prev.map((m) => {
-          if (m.matchId === matchId) {
-            return {
-              ...m,
-              status: 'completed',
-              winnerId,
-              completedAt: Date.now(),
-            };
-          }
-          if (!promotedNext && m.court === courtNum && m.status === 'scheduled') {
-            promotedNext = true;
-            return {
-              ...m,
-              status: 'live',
-              startedAt: Date.now(),
-            };
-          }
-          return m;
-        });
-      });
-
-      // Reset timer on this court
-      if (courtNum === 1) {
-        court1Timer.reset(420);
-      } else {
-        court2Timer.reset(420);
-      }
-
-      return { success: true };
     },
-    [matches, knockoutMatches, court1Timer, court2Timer, settings.soundEnabled]
+    [isCoach, knockoutMatches, matches, settings.soundEnabled, syncToCloud]
   );
 
-  // Manual Match Override (Coordinator typo fix or status change)
+  // Manual Match Override from Modal
   const overrideMatch = useCallback(
     (
       matchId: string,
       updates: Partial<Match> & { scoreA?: number; scoreB?: number; status?: Match['status']; winnerId?: string | null; court?: 1 | 2 }
     ) => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
       const isKo = knockoutMatches.some((m) => m.id === matchId);
-
       if (isKo) {
-        setKnockoutMatches((prev) =>
-          prev.map((m) => {
-            if (m.id !== matchId) return m;
-            return {
-              ...m,
-              scoreA: updates.scoreA !== undefined ? updates.scoreA : m.scoreA,
-              scoreB: updates.scoreB !== undefined ? updates.scoreB : m.scoreB,
-              status: updates.status || m.status,
-              court: updates.court || m.court,
-              winnerId: updates.winnerId !== undefined ? updates.winnerId : m.winnerId,
-            };
-          })
-        );
+        setKnockoutMatches((prev) => {
+          const next = prev.map((m) => (m.id === matchId ? ({ ...m, ...updates } as KnockoutMatch) : m));
+          syncToCloud({ knockoutMatches: next });
+          return next;
+        });
       } else {
-        setMatches((prev) =>
-          prev.map((m) => {
-            if (m.matchId !== matchId) return m;
-            return {
-              ...m,
-              scoreA: updates.scoreA !== undefined ? updates.scoreA : m.scoreA,
-              scoreB: updates.scoreB !== undefined ? updates.scoreB : m.scoreB,
-              status: updates.status || m.status,
-              court: updates.court || m.court,
-              courtAssigned: updates.court || m.courtAssigned,
-              winnerId: updates.winnerId !== undefined ? updates.winnerId : m.winnerId,
-            };
-          })
-        );
+        setMatches((prev) => {
+          const next = prev.map((m) => (m.matchId === matchId ? { ...m, ...updates } : m));
+          syncToCloud({ matches: next });
+          return next;
+        });
       }
     },
-    [knockoutMatches]
+    [isCoach, knockoutMatches, syncToCloud]
   );
 
-  // Dispatch scheduled match to Court 1 or Court 2
-  const dispatchToCourt = useCallback((matchId: string, targetCourt: 1 | 2) => {
-    setMatches((prev) =>
-      prev.map((m) => {
-        if (m.matchId === matchId) {
-          return {
-            ...m,
-            court: targetCourt,
-            courtAssigned: targetCourt,
-            status: 'live',
-          };
-        }
-        // If there was already a live match on targetCourt, keep it or allow manual
-        return m;
-      })
-    );
-  }, []);
+  // Dispatch a specific match to a court
+  const dispatchToCourt = useCallback(
+    (matchId: string, court: 1 | 2) => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
+      const isKo = knockoutMatches.some((m) => m.id === matchId);
+      if (isKo) {
+        setKnockoutMatches((prev) => {
+          const next = prev.map((m) => {
+            if (m.id === matchId) return { ...m, court, status: 'live' as const };
+            if (m.court === court && m.status === 'live') return { ...m, status: 'scheduled' as const };
+            return m;
+          });
+          syncToCloud({ knockoutMatches: next });
+          return next;
+        });
+      } else {
+        setMatches((prev) => {
+          const next = prev.map((m) => {
+            if (m.matchId === matchId) return { ...m, court, status: 'live' as const };
+            if (m.court === court && m.status === 'live') return { ...m, status: 'scheduled' as const };
+            return m;
+          });
+          syncToCloud({ matches: next });
+          return next;
+        });
+      }
+    },
+    [isCoach, knockoutMatches, syncToCloud]
+  );
 
   // Update Team Name
-  const updateTeamName = useCallback((teamId: string, newName: string) => {
-    setTeams((prev) =>
-      prev.map((t) => (t.id === teamId ? { ...t, name: newName } : t))
-    );
-  }, []);
+  const updateTeamName = useCallback(
+    (teamId: string, newName: string) => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
+      setTeams((prev) => {
+        const next = prev.map((t) => (t.id === teamId ? { ...t, name: newName } : t));
+        syncToCloud({ teams: next });
+        return next;
+      });
+    },
+    [isCoach, syncToCloud]
+  );
 
   // Load Star Badminton Pairs Preset
   const loadStarPlayers = useCallback(() => {
-    setTeams((prev) =>
-      prev.map((t) => {
+    if (!isCoach) {
+      setShowAuthModal(true);
+      return;
+    }
+    setTeams((prev) => {
+      const next = prev.map((t) => {
         const found = PRO_PAIRS_PRESET.find((p) => p.id === t.id);
         return found ? { ...t, name: found.name } : t;
-      })
-    );
-  }, []);
+      });
+      syncToCloud({ teams: next });
+      return next;
+    });
+  }, [isCoach, syncToCloud]);
 
   // Load Ground Tournament Teams
   const loadGroundTeams = useCallback(() => {
+    if (!isCoach) {
+      setShowAuthModal(true);
+      return;
+    }
     setTeams(DEFAULT_TEAMS);
-  }, []);
+    syncToCloud({ teams: DEFAULT_TEAMS });
+  }, [isCoach, syncToCloud]);
 
   // Fast Simulate Remaining Group Stage Matches
   const simulateRemainingGroupMatches = useCallback(() => {
+    if (!isCoach) {
+      setShowAuthModal(true);
+      return;
+    }
     unlockAudioContext();
     const realisticScores = [
       [5, 3],
       [5, 4],
       [5, 2],
       [5, 1],
+      [5, 0],
       [3, 5],
       [4, 5],
       [2, 5],
-      [1, 5],
     ];
 
-    setMatches((prev) =>
-      prev.map((m, idx) => {
+    setMatches((prev) => {
+      const next = prev.map((m, idx) => {
         if (m.status === 'completed') return m;
-        const [scA, scB] = realisticScores[(idx * 7 + 3) % realisticScores.length];
-        const winner = scA > scB ? m.teamA_id : m.teamB_id;
+        const [scA, scB] = realisticScores[idx % realisticScores.length];
+        const winnerId = scA > scB ? m.teamA_id : m.teamB_id;
         return {
           ...m,
           scoreA: scA,
           scoreB: scB,
-          status: 'completed',
-          winnerId: winner,
+          status: 'completed' as const,
+          winnerId,
           completedAt: Date.now(),
         };
-      })
-    );
+      });
+      syncToCloud({ matches: next });
+      return next;
+    });
+  }, [isCoach, syncToCloud]);
 
-    // Switch active tab to Standings or Knockout to view results
-    setActiveTab('standings');
-  }, []);
-
-  // Knockout Mode Toggle
-  const setKnockoutMode = useCallback((mode: KnockoutMode) => {
-    setSettings((prev) => ({ ...prev, knockoutMode: mode }));
-    setKnockoutMatches(initializeKnockoutMatches(mode));
-  }, []);
+  // Set Knockout Mode
+  const setKnockoutMode = useCallback(
+    (mode: KnockoutMode) => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
+      setSettings((prev) => {
+        const next = { ...prev, knockoutMode: mode };
+        const initializedKo = initializeKnockoutMatches(mode);
+        const resolvedKo = resolveKnockoutSeeds(initializedKo, standings, mode);
+        setKnockoutMatches(resolvedKo);
+        syncToCloud({ settings: next, knockoutMatches: resolvedKo });
+        return next;
+      });
+    },
+    [isCoach, standings, syncToCloud]
+  );
 
   // Reset Tournament
   const resetTournament = useCallback(() => {
+    if (!isCoach) {
+      setShowAuthModal(true);
+      return;
+    }
     clearTournamentStorage();
-    const newTeams = DEFAULT_TEAMS;
-    const newMatches = generateGroupMatches(newTeams);
-    const newSettings = { ...DEFAULT_SETTINGS, tournamentStartTime: Date.now() };
-    const newKnockout = initializeKnockoutMatches(newSettings.knockoutMode);
-
-    setTeams(newTeams);
-    setMatches(newMatches);
-    setSettings(newSettings);
-    setKnockoutMatches(newKnockout);
+    const freshMatches = generateGroupMatches(DEFAULT_TEAMS);
+    const freshKo = initializeKnockoutMatches(DEFAULT_SETTINGS.knockoutMode);
+    setTeams(DEFAULT_TEAMS);
+    setMatches(freshMatches);
+    setKnockoutMatches(freshKo);
+    setSettings(DEFAULT_SETTINGS);
     setC1Seconds(420);
-    setC1Running(false);
     setC2Seconds(420);
+    setC1Running(false);
     setC2Running(false);
     setShowPodiumModal(false);
-    setActiveTab('courts');
-  }, []);
 
-  // Import JSON backup
-  const importTournamentJSON = useCallback((jsonData: string): boolean => {
-    try {
-      const parsed = JSON.parse(jsonData) as StoredTournamentState;
-      if (parsed && Array.isArray(parsed.teams) && Array.isArray(parsed.matches)) {
-        setTeams(parsed.teams);
-        setMatches(parsed.matches);
-        if (parsed.knockoutMatches) setKnockoutMatches(parsed.knockoutMatches);
-        if (parsed.settings) setSettings(parsed.settings);
-        if (parsed.court1TimerSec) setC1Seconds(parsed.court1TimerSec);
-        if (parsed.court2TimerSec) setC2Seconds(parsed.court2TimerSec);
-        return true;
+    syncToCloud({
+      teams: DEFAULT_TEAMS,
+      matches: freshMatches,
+      knockoutMatches: freshKo,
+      settings: DEFAULT_SETTINGS,
+      c1Seconds: 420,
+      c2Seconds: 420,
+      c1Running: false,
+      c2Running: false,
+    });
+  }, [isCoach, syncToCloud]);
+
+  // Import JSON State
+  const importTournamentJSON = useCallback(
+    (jsonData: string): boolean => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return false;
       }
-      return false;
-    } catch (e) {
-      console.error('Import failed', e);
-      return false;
-    }
-  }, []);
+      try {
+        const parsed = JSON.parse(jsonData);
+        if (parsed.teams && parsed.matches && parsed.knockoutMatches) {
+          setTeams(parsed.teams);
+          setMatches(parsed.matches);
+          setKnockoutMatches(parsed.knockoutMatches);
+          if (parsed.settings) setSettings(parsed.settings);
+          syncToCloud({
+            teams: parsed.teams,
+            matches: parsed.matches,
+            knockoutMatches: parsed.knockoutMatches,
+            settings: parsed.settings || settings,
+          });
+          return true;
+        }
+        return false;
+      } catch (err) {
+        console.error('Import parse error:', err);
+        return false;
+      }
+    },
+    [isCoach, settings, syncToCloud]
+  );
 
-  // Final Podium calculations
-  const finalMatch = knockoutMatches.find((m) => m.id === 'final');
-  const isTournamentFinished = Boolean(finalMatch && finalMatch.status === 'completed' && finalMatch.winnerId);
-
-  const championTeam = useMemo(() => {
-    if (!finalMatch || !finalMatch.winnerId) return null;
-    return teams.find((t) => t.id === finalMatch.winnerId) || null;
-  }, [finalMatch, teams]);
-
-  const runnerUpTeam = useMemo(() => {
-    if (!finalMatch || !finalMatch.winnerId) return null;
-    const loserId = finalMatch.winnerId === finalMatch.teamAId ? finalMatch.teamBId : finalMatch.teamAId;
-    return teams.find((t) => t.id === loserId) || null;
-  }, [finalMatch, teams]);
-
-  const semiFinalistTeams = useMemo(() => {
-    const semis = knockoutMatches.filter((m) => m.stage === 'semi' && m.status === 'completed');
-    const losers = semis
-      .map((s) => (s.winnerId === s.teamAId ? s.teamBId : s.teamAId))
-      .filter((id): id is string => Boolean(id));
-    return teams.filter((t) => losers.includes(t.id));
-  }, [knockoutMatches, teams]);
-
+  // Derived tournament statistics
   const completedMatchesCount = useMemo(() => {
     return matches.filter((m) => m.status === 'completed').length;
   }, [matches]);
 
   const totalGroupMatchesCount = matches.length;
+
+  // Podium Winners calculation
+  const finalMatch = useMemo(() => {
+    return knockoutMatches.find((m) => m.stage === 'final');
+  }, [knockoutMatches]);
+
+  const isTournamentFinished = Boolean(
+    finalMatch && finalMatch.status === 'completed' && finalMatch.winnerId
+  );
+
+  const championTeam = useMemo(() => {
+    if (!isTournamentFinished || !finalMatch?.winnerId) return null;
+    return teams.find((t) => t.id === finalMatch.winnerId) || null;
+  }, [isTournamentFinished, finalMatch, teams]);
+
+  const runnerUpTeam = useMemo(() => {
+    if (!isTournamentFinished || !finalMatch) return null;
+    const runnerUpId =
+      finalMatch.winnerId === finalMatch.teamAId ? finalMatch.teamBId : finalMatch.teamAId;
+    return teams.find((t) => t.id === runnerUpId) || null;
+  }, [isTournamentFinished, finalMatch, teams]);
+
+  const semiFinalistTeams = useMemo(() => {
+    const semiMatches = knockoutMatches.filter((m) => m.stage === 'semi');
+    const losers: string[] = [];
+    semiMatches.forEach((sm) => {
+      if (sm.status === 'completed' && sm.winnerId) {
+        const loserId = sm.winnerId === sm.teamAId ? sm.teamBId : sm.teamAId;
+        if (loserId) losers.push(loserId);
+      }
+    });
+    return teams.filter((t) => losers.includes(t.id));
+  }, [knockoutMatches, teams]);
 
   const value: TournamentContextType = {
     teams,
@@ -738,6 +1040,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     toggleSound,
     resetTournament,
     importTournamentJSON,
+    userRole,
+    isCoach,
+    coachKey,
+    spectatorKey,
+    showAuthModal,
+    setShowAuthModal,
+    unlockCoachMode,
+    lockCoachMode,
+    updateCoachKey,
+    cloudSyncStatus,
+    triggerManualCloudSync,
     showPodiumModal,
     setShowPodiumModal,
     championTeam,

@@ -7,9 +7,11 @@ import { ScheduleView } from './components/views/ScheduleView';
 import { StandingsView } from './components/views/StandingsView';
 import { KnockoutView } from './components/views/KnockoutView';
 import { AdminView } from './components/views/AdminView';
+import { AuthKeyModal } from './components/modals/AuthKeyModal';
+import { PodiumModal } from './components/modals/PodiumModal';
 
 const TournamentApp: React.FC = () => {
-  const { activeTab } = useTournament();
+  const { activeTab, showAuthModal, setShowAuthModal } = useTournament();
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col selection:bg-emerald-500 selection:text-white antialiased">
@@ -28,9 +30,16 @@ const TournamentApp: React.FC = () => {
         {activeTab === 'admin' && <AdminView />}
       </main>
 
+      {/* Global Modals */}
+      <AuthKeyModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+      />
+      <PodiumModal />
+
       {/* Desktop Minimal Footer */}
       <footer className="hidden md:block py-4 border-t border-slate-200 text-center text-xs text-slate-400 bg-white">
-        SmashFlow Tournament Operations Engine • 2 Courts • 20 Teams • 3-Hour Window • LocalStorage Auto-save
+        SmashFlow Tournament Operations Engine • 2 Courts • 20 Teams • 3-Hour Window • Multi-Device Cloud Sync
       </footer>
     </div>
   );

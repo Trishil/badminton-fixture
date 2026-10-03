@@ -9,6 +9,13 @@ import {
   FileCode,
   RefreshCw,
   Users,
+  Shield,
+  Key,
+  Lock,
+  Unlock,
+  Eye,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { GroupId } from '../../types/tournament';
 import { useTournament } from '../../context/TournamentContext';
@@ -27,11 +34,43 @@ export const AdminView: React.FC = () => {
     loadGroundTeams,
     simulateRemainingGroupMatches,
     importTournamentJSON,
+    isCoach,
+    coachKey,
+    updateCoachKey,
+    cloudSyncStatus,
+    triggerManualCloudSync,
+    setShowAuthModal,
   } = useTournament();
 
   const [filterGroup, setFilterGroup] = useState<'all' | GroupId>('all');
   const [showResetModal, setShowResetModal] = useState(false);
   const [importNotice, setImportNotice] = useState<{ text: string; error?: boolean } | null>(null);
+  const [copiedLink, setCopiedLink] = useState<'spectator' | 'coach' | null>(null);
+  const [customCoachKeyInput, setCustomCoachKeyInput] = useState('');
+
+  const getSpectatorUrl = () => {
+    if (typeof window === 'undefined') return '';
+    return window.location.origin + window.location.pathname;
+  };
+
+  const getCoachUrl = () => {
+    if (typeof window === 'undefined') return '';
+    return `${window.location.origin}${window.location.pathname}?key=${encodeURIComponent(coachKey)}`;
+  };
+
+  const copyLink = (url: string, type: 'spectator' | 'coach') => {
+    navigator.clipboard.writeText(url);
+    setCopiedLink(type);
+    setTimeout(() => setCopiedLink(null), 2500);
+  };
+
+  const requireCoach = (action: () => void) => {
+    if (!isCoach) {
+      setShowAuthModal(true);
+      return;
+    }
+    action();
+  };
 
   const displayedTeams =
     filterGroup === 'all' ? teams : teams.filter((t) => t.group === filterGroup);
@@ -83,7 +122,7 @@ export const AdminView: React.FC = () => {
         {/* Quick Actions */}
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={loadGroundTeams}
+            onClick={() => requireCoach(loadGroundTeams)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 text-xs font-bold border border-blue-200 transition"
             title="Load your 15 Tournament Ground Teams"
           >
@@ -92,7 +131,7 @@ export const AdminView: React.FC = () => {
           </button>
 
           <button
-            onClick={loadStarPlayers}
+            onClick={() => requireCoach(loadStarPlayers)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold border border-amber-200 transition"
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-600" />
@@ -100,7 +139,7 @@ export const AdminView: React.FC = () => {
           </button>
 
           <button
-            onClick={simulateRemainingGroupMatches}
+            onClick={() => requireCoach(simulateRemainingGroupMatches)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold border border-emerald-200 transition"
           >
             <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
@@ -108,12 +147,202 @@ export const AdminView: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setShowResetModal(true)}
+            onClick={() => requireCoach(() => setShowResetModal(true))}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold border border-rose-200 transition"
           >
             <Trash2 className="w-3.5 h-3.5 text-rose-600" />
             <span>Reset All Data</span>
           </button>
+        </div>
+      </div>
+
+      {/* Access Keys & Real-time Cloud Sync Hub */}
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 bg-slate-50/80 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div
+              className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                isCoach ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-700'
+              }`}
+            >
+              <Shield className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-slate-900 text-base">
+                Database & Access Key Management
+              </h3>
+              <p className="text-xs text-slate-500">
+                Multi-device Firestore synchronization with Coach Editor vs Spectator roles.
+              </p>
+            </div>
+          </div>
+
+          {/* Cloud Sync Status & Sync Button */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-semibold text-slate-700">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  cloudSyncStatus === 'synced'
+                    ? 'bg-emerald-500 animate-pulse'
+                    : cloudSyncStatus === 'syncing'
+                    ? 'bg-sky-500 animate-spin'
+                    : 'bg-rose-500'
+                }`}
+              />
+              <span>
+                Status: {cloudSyncStatus === 'synced' ? 'Cloud Connected' : cloudSyncStatus}
+              </span>
+            </div>
+            <button
+              onClick={triggerManualCloudSync}
+              className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 transition flex items-center gap-1.5"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 text-emerald-600 ${
+                  cloudSyncStatus === 'syncing' ? 'animate-spin' : ''
+                }`}
+              />
+              <span>Sync Now</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Share Links Card */}
+          <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
+            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Shareable Tournament Links
+            </h4>
+
+            {/* Spectator Link */}
+            <div className="bg-white p-3 rounded-lg border border-slate-200 flex items-center justify-between gap-2 shadow-xs">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  <Eye className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Public Spectator Link (Read-Only)</span>
+                </div>
+                <p className="text-xs font-mono text-slate-800 truncate mt-0.5">
+                  {getSpectatorUrl()}
+                </p>
+              </div>
+              <button
+                onClick={() => copyLink(getSpectatorUrl(), 'spectator')}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 transition flex items-center gap-1 flex-shrink-0"
+              >
+                {copiedLink === 'spectator' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Coach Direct Link */}
+            <div className="bg-amber-50/60 p-3 rounded-lg border border-amber-200 flex items-center justify-between gap-2 shadow-xs">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1 text-[11px] font-bold text-amber-800 uppercase tracking-wider">
+                  <Key className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Coach Direct Link (Auto-Unlocks Scoring)</span>
+                </div>
+                <p className="text-xs font-mono text-slate-800 truncate mt-0.5">
+                  {getCoachUrl()}
+                </p>
+              </div>
+              <button
+                onClick={() => copyLink(getCoachUrl(), 'coach')}
+                className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-amber-100 text-amber-900 text-xs font-bold border border-amber-300 transition flex items-center gap-1 flex-shrink-0"
+              >
+                {copiedLink === 'coach' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Role Status & Key Config */}
+          <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col justify-between">
+            <div>
+              <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                Your Device Access Level
+              </h4>
+              <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-slate-200 shadow-xs">
+                <div className="flex items-center gap-2.5">
+                  {isCoach ? (
+                    <Unlock className="w-5 h-5 text-amber-600" />
+                  ) : (
+                    <Lock className="w-5 h-5 text-slate-400" />
+                  )}
+                  <div>
+                    <span className="text-xs font-bold text-slate-900 block">
+                      {isCoach ? 'Coach Mode (Editor Access)' : 'Spectator Mode (View Only)'}
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      {isCoach
+                        ? 'Full rights to score matches, advance fixtures, and change rosters.'
+                        : 'Unlock coach mode with editor key to make changes.'}
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border shadow-xs transition ${
+                    isCoach
+                      ? 'bg-amber-100 hover:bg-amber-200 text-amber-900 border-amber-300'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
+                  }`}
+                >
+                  {isCoach ? 'Manage Key' : 'Unlock Coach'}
+                </button>
+              </div>
+            </div>
+
+            {/* Coach Key customization (visible if coach) */}
+            {isCoach && (
+              <div className="pt-2 border-t border-slate-200">
+                <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider block mb-1">
+                  Active Coach Key:{' '}
+                  <code className="font-mono text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
+                    {coachKey}
+                  </code>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Set new coach key..."
+                    value={customCoachKeyInput}
+                    onChange={(e) => setCustomCoachKeyInput(e.target.value)}
+                    className="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    onClick={() => {
+                      if (customCoachKeyInput.trim()) {
+                        updateCoachKey(customCoachKeyInput.trim());
+                        setCustomCoachKeyInput('');
+                      }
+                    }}
+                    disabled={!customCoachKeyInput.trim()}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-bold disabled:opacity-40 transition"
+                  >
+                    Update
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -173,12 +402,21 @@ export const AdminView: React.FC = () => {
               <span>Backup JSON</span>
             </button>
 
-            <label className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 flex items-center justify-center gap-1 transition cursor-pointer">
+            <label
+              onClick={(e) => {
+                if (!isCoach) {
+                  e.preventDefault();
+                  setShowAuthModal(true);
+                }
+              }}
+              className="py-2 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 flex items-center justify-center gap-1 transition cursor-pointer"
+            >
               <Upload className="w-3 h-3 text-purple-600" />
               <span>Restore</span>
               <input
                 type="file"
                 accept=".json"
+                disabled={!isCoach}
                 onChange={handleFileUpload}
                 className="hidden"
               />
@@ -258,8 +496,22 @@ export const AdminView: React.FC = () => {
                 <input
                   type="text"
                   value={team.name}
-                  onChange={(e) => updateTeamName(team.id, e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-medium shadow-xs"
+                  readOnly={!isCoach}
+                  onClick={() => {
+                    if (!isCoach) setShowAuthModal(true);
+                  }}
+                  onChange={(e) => {
+                    if (!isCoach) {
+                      setShowAuthModal(true);
+                      return;
+                    }
+                    updateTeamName(team.id, e.target.value);
+                  }}
+                  className={`w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 font-medium shadow-xs transition ${
+                    isCoach
+                      ? 'focus:outline-none focus:border-emerald-500'
+                      : 'cursor-not-allowed bg-slate-100/70 text-slate-600'
+                  }`}
                 />
               </div>
             </div>

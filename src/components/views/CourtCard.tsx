@@ -10,6 +10,8 @@ import {
   ArrowRight,
   AlertCircle,
   Zap,
+  Eye,
+  Key,
 } from 'lucide-react';
 import { Match, KnockoutMatch } from '../../types/tournament';
 import { useTournament } from '../../context/TournamentContext';
@@ -32,6 +34,8 @@ export const CourtCard: React.FC<CourtCardProps> = ({
     updateScore,
     quickFinishMatch,
     finishAndAdvanceMatch,
+    isCoach,
+    setShowAuthModal,
   } = useTournament();
 
   const [actionError, setActionError] = useState<string | null>(null);
@@ -163,40 +167,42 @@ export const CourtCard: React.FC<CourtCardProps> = ({
             <span>{formatTimer(timer.secondsRemaining)}</span>
           </div>
 
-          {/* Timer Controls */}
-          <div className="flex items-center gap-1">
-            {timer.isRunning ? (
+          {/* Timer Controls (Coach Only) */}
+          {isCoach && (
+            <div className="flex items-center gap-1">
+              {timer.isRunning ? (
+                <button
+                  onClick={timer.pause}
+                  title="Pause Match Timer"
+                  className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition"
+                >
+                  <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={timer.start}
+                  title="Start Match Timer"
+                  className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition shadow-xs"
+                >
+                  <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-white" />
+                </button>
+              )}
               <button
-                onClick={timer.pause}
-                title="Pause Match Timer"
-                className="p-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 transition"
+                onClick={() => timer.reset(420)}
+                title="Reset Timer to 7:00"
+                className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 border border-slate-200 transition"
               >
-                <Pause className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               </button>
-            ) : (
               <button
-                onClick={timer.start}
-                title="Start Match Timer"
-                className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition shadow-xs"
+                onClick={timer.addMinute}
+                title="Add +1 Minute"
+                className="px-1.5 py-1 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-mono font-bold"
               >
-                <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 fill-white" />
+                +1m
               </button>
-            )}
-            <button
-              onClick={() => timer.reset(420)}
-              title="Reset Timer to 7:00"
-              className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 border border-slate-200 transition"
-            >
-              <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
-            <button
-              onClick={timer.addMinute}
-              title="Add +1 Minute"
-              className="px-1.5 py-1 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 font-mono font-bold"
-            >
-              +1m
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -257,25 +263,27 @@ export const CourtCard: React.FC<CourtCardProps> = ({
                 </span>
               </div>
 
-              {/* Large Touch Buttons for Mobile Ground Coordinators */}
-              <div className="w-full flex items-center gap-1.5 sm:gap-2">
-                <button
-                  onClick={() => updateScore(matchId, 'A', -1)}
-                  disabled={scoreA <= 0}
-                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-slate-100 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center transition border border-slate-300 shadow-xs"
-                  aria-label="Decrease Team A score"
-                >
-                  <Minus className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => updateScore(matchId, 'A', 1)}
-                  className="flex-1 h-11 sm:h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-lg flex items-center justify-center gap-1 transition shadow-sm shadow-emerald-600/30"
-                  aria-label="Increase Team A score"
-                >
-                  <Plus className="w-5 h-5" />
-                  <span>+1</span>
-                </button>
-              </div>
+              {/* Large Touch Buttons for Mobile Ground Coordinators (Coach Only) */}
+              {isCoach && (
+                <div className="w-full flex items-center gap-1.5 sm:gap-2">
+                  <button
+                    onClick={() => updateScore(matchId, 'A', -1)}
+                    disabled={scoreA <= 0}
+                    className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-slate-100 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center transition border border-slate-300 shadow-xs"
+                    aria-label="Decrease Team A score"
+                  >
+                    <Minus className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => updateScore(matchId, 'A', 1)}
+                    className="flex-1 h-11 sm:h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-lg flex items-center justify-center gap-1 transition shadow-sm shadow-emerald-600/30"
+                    aria-label="Increase Team A score"
+                  >
+                    <Plus className="w-5 h-5" />
+                    <span>+1</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Team B Card */}
@@ -309,77 +317,100 @@ export const CourtCard: React.FC<CourtCardProps> = ({
                 </span>
               </div>
 
-              {/* Large Touch Buttons for Mobile Ground Coordinators */}
-              <div className="w-full flex items-center gap-1.5 sm:gap-2">
+              {/* Large Touch Buttons for Mobile Ground Coordinators (Coach Only) */}
+              {isCoach && (
+                <div className="w-full flex items-center gap-1.5 sm:gap-2">
+                  <button
+                    onClick={() => updateScore(matchId, 'B', -1)}
+                    disabled={scoreB <= 0}
+                    className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-slate-100 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center transition border border-slate-300 shadow-xs"
+                    aria-label="Decrease Team B score"
+                  >
+                    <Minus className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={() => updateScore(matchId, 'B', 1)}
+                    className="flex-1 h-11 sm:h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-lg flex items-center justify-center gap-1 transition shadow-sm shadow-emerald-600/30"
+                    aria-label="Increase Team B score"
+                  >
+                    <Plus className="w-5 h-5" />
+                    <span>+1</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Finish Shortcuts & Finish Match CTA vs Spectator View */}
+          {isCoach ? (
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center gap-1.5 sm:gap-2 text-xs overflow-x-auto pb-1 sm:pb-0">
+                <span className="text-slate-500 font-semibold whitespace-nowrap hidden sm:inline">Quick Score:</span>
                 <button
-                  onClick={() => updateScore(matchId, 'B', -1)}
-                  disabled={scoreB <= 0}
-                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-slate-100 active:scale-95 disabled:opacity-30 disabled:pointer-events-none text-slate-700 flex items-center justify-center transition border border-slate-300 shadow-xs"
-                  aria-label="Decrease Team B score"
+                  onClick={() => quickFinishMatch(matchId, teamAId, 5, 3)}
+                  className="flex-1 py-1.5 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs truncate border border-slate-200 transition text-center"
                 >
-                  <Minus className="w-5 h-5" />
+                  {getTeamShort(teamAId)} 5-3
                 </button>
                 <button
-                  onClick={() => updateScore(matchId, 'B', 1)}
-                  className="flex-1 h-11 sm:h-12 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-lg flex items-center justify-center gap-1 transition shadow-sm shadow-emerald-600/30"
-                  aria-label="Increase Team B score"
+                  onClick={() => quickFinishMatch(matchId, teamBId, 5, 3)}
+                  className="flex-1 py-1.5 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs truncate border border-slate-200 transition text-center"
                 >
-                  <Plus className="w-5 h-5" />
-                  <span>+1</span>
+                  {getTeamShort(teamBId)} 5-3
+                </button>
+                <button
+                  onClick={() => quickFinishMatch(matchId, teamAId, 5, 4)}
+                  className="py-1.5 px-2.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium text-xs border border-amber-200 transition"
+                  title="5-4 Sudden Death Win for Side A"
+                >
+                  5-4 (A)
+                </button>
+                <button
+                  onClick={() => quickFinishMatch(matchId, teamBId, 5, 4)}
+                  className="py-1.5 px-2.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium text-xs border border-amber-200 transition"
+                  title="5-4 Sudden Death Win for Side B"
+                >
+                  5-4 (B)
+                </button>
+              </div>
+
+              {/* Primary Action Button: Finish Match & Free Court */}
+              <button
+                onClick={handleFinishMatch}
+                className={`w-full py-3.5 px-4 rounded-xl font-bold text-sm sm:text-base flex items-center justify-center gap-2 transition-all shadow-sm active:scale-[0.99] ${
+                  scoreA !== scoreB
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold shadow-emerald-600/25'
+                    : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                }`}
+              >
+                <CheckCircle className="w-5 h-5 text-current" />
+                <span className="truncate">
+                  {scoreA !== scoreB
+                    ? `Finish Match & Call Next (${scoreA > scoreB ? getTeamShort(teamAId) : getTeamShort(teamBId)} Wins)`
+                    : 'Finish Match (A winner is required)'}
+                </span>
+              </button>
+            </div>
+          ) : (
+            /* Spectator Read-only View Banner */
+            <div className="pt-2">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Eye className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                  <p className="text-xs text-slate-600 truncate">
+                    <strong className="text-slate-800">Spectator View:</strong> Live scores synced across devices.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="px-2.5 py-1 text-xs font-bold bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-800 rounded-lg border border-slate-200 shadow-xs flex items-center gap-1 flex-shrink-0 transition"
+                >
+                  <Key className="w-3 h-3 text-amber-600" />
+                  <span>Coach Unlock</span>
                 </button>
               </div>
             </div>
-          </div>
-
-          {/* Quick Finish Shortcuts & Finish Match CTA */}
-          <div className="space-y-2 pt-1">
-            <div className="flex items-center gap-1.5 sm:gap-2 text-xs overflow-x-auto pb-1 sm:pb-0">
-              <span className="text-slate-500 font-semibold whitespace-nowrap hidden sm:inline">Quick Score:</span>
-              <button
-                onClick={() => quickFinishMatch(matchId, teamAId, 5, 3)}
-                className="flex-1 py-1.5 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs truncate border border-slate-200 transition text-center"
-              >
-                {getTeamShort(teamAId)} 5-3
-              </button>
-              <button
-                onClick={() => quickFinishMatch(matchId, teamBId, 5, 3)}
-                className="flex-1 py-1.5 px-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs truncate border border-slate-200 transition text-center"
-              >
-                {getTeamShort(teamBId)} 5-3
-              </button>
-              <button
-                onClick={() => quickFinishMatch(matchId, teamAId, 5, 4)}
-                className="py-1.5 px-2.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium text-xs border border-amber-200 transition"
-                title="5-4 Sudden Death Win for Side A"
-              >
-                5-4 (A)
-              </button>
-              <button
-                onClick={() => quickFinishMatch(matchId, teamBId, 5, 4)}
-                className="py-1.5 px-2.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-medium text-xs border border-amber-200 transition"
-                title="5-4 Sudden Death Win for Side B"
-              >
-                5-4 (B)
-              </button>
-            </div>
-
-            {/* Primary Action Button: Finish Match & Free Court */}
-            <button
-              onClick={handleFinishMatch}
-              className={`w-full py-3.5 px-4 rounded-xl font-bold text-sm sm:text-base flex items-center justify-center gap-2 transition-all shadow-sm active:scale-[0.99] ${
-                scoreA !== scoreB
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold shadow-emerald-600/25'
-                  : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-              }`}
-            >
-              <CheckCircle className="w-5 h-5 text-current" />
-              <span className="truncate">
-                {scoreA !== scoreB
-                  ? `Finish Match & Call Next (${scoreA > scoreB ? getTeamShort(teamAId) : getTeamShort(teamBId)} Wins)`
-                  : 'Finish Match (A winner is required)'}
-              </span>
-            </button>
-          </div>
+          )}
         </div>
       ) : (
         /* Empty / Idle Court State */
@@ -416,7 +447,7 @@ export const CourtCard: React.FC<CourtCardProps> = ({
           </div>
         </div>
 
-        {upNextMatch && upNextMatchId && (
+        {isCoach && upNextMatch && upNextMatchId && (
           <button
             onClick={() => {
               if (liveMatch && matchId) {

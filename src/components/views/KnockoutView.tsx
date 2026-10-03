@@ -27,6 +27,8 @@ export const KnockoutView: React.FC = () => {
     isTournamentFinished,
     championTeam,
     setActiveTab,
+    isCoach,
+    setShowAuthModal,
   } = useTournament();
 
   const [editingMatch, setEditingMatch] = useState<KnockoutMatch | null>(null);
@@ -134,7 +136,7 @@ export const KnockoutView: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {isReady && !isCompleted && (
+              {isCoach && isReady && !isCompleted && (
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => updateScore(m.id, 'A', -1)}
@@ -186,7 +188,7 @@ export const KnockoutView: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {isReady && !isCompleted && (
+              {isCoach && isReady && !isCompleted && (
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => updateScore(m.id, 'B', -1)}
@@ -215,8 +217,8 @@ export const KnockoutView: React.FC = () => {
             </div>
           </div>
 
-          {/* Action CTAs */}
-          {isReady && !isCompleted && (
+          {/* Action CTAs (Coach Only) */}
+          {isCoach && isReady && !isCompleted && (
             <div className="pt-1 flex flex-col gap-1.5">
               <div className="flex items-center gap-1 text-[11px]">
                 <button
@@ -279,7 +281,13 @@ export const KnockoutView: React.FC = () => {
         {/* Mode Switcher Toggle */}
         <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs self-start sm:self-auto">
           <button
-            onClick={() => setKnockoutMode('top1_semis')}
+            onClick={() => {
+              if (!isCoach) {
+                setShowAuthModal(true);
+                return;
+              }
+              setKnockoutMode('top1_semis');
+            }}
             className={`px-3 py-1.5 rounded-lg font-bold transition ${
               settings.knockoutMode === 'top1_semis'
                 ? 'bg-amber-500 text-slate-950 shadow-xs'
@@ -289,7 +297,13 @@ export const KnockoutView: React.FC = () => {
             Top 1 (4-Team Semis)
           </button>
           <button
-            onClick={() => setKnockoutMode('top2_quarters')}
+            onClick={() => {
+              if (!isCoach) {
+                setShowAuthModal(true);
+                return;
+              }
+              setKnockoutMode('top2_quarters');
+            }}
             className={`px-3 py-1.5 rounded-lg font-bold transition ${
               settings.knockoutMode === 'top2_quarters'
                 ? 'bg-amber-500 text-slate-950 shadow-xs'

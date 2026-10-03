@@ -74,3 +74,7 @@ export interface TournamentSettings {
   knockoutMode: KnockoutMode;
   soundEnabled: boolean;
 }
+
+export type UserRole = 'coach' | 'spectator';
+export type CloudSyncStatus = 'synced' | 'syncing' | 'offline' | 'error';
+

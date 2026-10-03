@@ -6,6 +6,7 @@ import {
   Clock,
   CheckCircle2,
   Download,
+  Lock,
 } from 'lucide-react';
 import { Match, GroupId } from '../../types/tournament';
 import { useTournament } from '../../context/TournamentContext';
@@ -13,7 +14,7 @@ import { EditMatchModal } from '../modals/EditMatchModal';
 import { exportFixturesToCSV } from '../../utils/export';
 
 export const ScheduleView: React.FC = () => {
-  const { matches, teams, dispatchToCourt } = useTournament();
+  const { matches, teams, dispatchToCourt, isCoach, setShowAuthModal } = useTournament();
 
   const [courtFilter, setCourtFilter] = useState<'all' | '1' | '2'>('all');
   const [poolFilter, setPoolFilter] = useState<'all' | GroupId>('all');
@@ -187,8 +188,14 @@ export const ScheduleView: React.FC = () => {
             return (
               <div
                 key={m.matchId}
-                onClick={() => setEditingMatch(m)}
-                className={`p-3 sm:p-4 rounded-xl border transition-all cursor-pointer hover:border-slate-300 shadow-xs hover:shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                onClick={() => {
+                  if (isCoach) {
+                    setEditingMatch(m);
+                  }
+                }}
+                className={`p-3 sm:p-4 rounded-xl border transition-all ${
+                  isCoach ? 'cursor-pointer hover:border-slate-300' : 'cursor-default'
+                } shadow-xs hover:shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                   m.status === 'live'
                     ? 'bg-emerald-50/70 border-emerald-300 ring-2 ring-emerald-500/20'
                     : m.status === 'completed'
@@ -283,8 +290,8 @@ export const ScheduleView: React.FC = () => {
                     </span>
                   )}
 
-                  {/* Direct dispatch button if scheduled */}
-                  {m.status === 'scheduled' && (
+                  {/* Direct dispatch button if scheduled (Coach Only) */}
+                  {m.status === 'scheduled' && isCoach && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -300,12 +307,20 @@ export const ScheduleView: React.FC = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
+                      if (!isCoach) {
+                        setShowAuthModal(true);
+                        return;
+                      }
                       setEditingMatch(m);
                     }}
-                    title="Edit match score / details"
+                    title={isCoach ? 'Edit match score / details' : 'Coach authorization required to edit'}
                     className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 border border-slate-200 transition"
                   >
-                    <Edit2 className="w-3.5 h-3.5" />
+                    {isCoach ? (
+                      <Edit2 className="w-3.5 h-3.5" />
+                    ) : (
+                      <Lock className="w-3.5 h-3.5 text-slate-400" />
+                    )}
                   </button>
                 </div>
               </div>
