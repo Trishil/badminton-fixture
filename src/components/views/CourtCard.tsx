@@ -36,6 +36,7 @@ export const CourtCard: React.FC<CourtCardProps> = ({
     finishAndAdvanceMatch,
     isCoach,
     setShowAuthModal,
+    matchTimings,
   } = useTournament();
 
   const [actionError, setActionError] = useState<string | null>(null);
@@ -155,6 +156,19 @@ export const CourtCard: React.FC<CourtCardProps> = ({
               )}
             </div>
             <p className="text-xs text-slate-500 truncate max-w-[180px] sm:max-w-none">{matchTitle}</p>
+            {matchId && matchTimings.get(matchId) && (
+              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                <span className="text-[10px] font-mono font-bold text-slate-700 bg-white/90 px-1.5 py-0.2 rounded border border-slate-200">
+                  {matchTimings.get(matchId)!.formattedTimeWindow}
+                </span>
+                {matchTimings.get(matchId)!.isOverdue && (
+                  <span className="text-[9px] font-black uppercase text-rose-700 bg-rose-100 border border-rose-200 px-1.5 py-0.2 rounded-full flex items-center gap-0.5 animate-pulse">
+                    <AlertCircle className="w-2.5 h-2.5" />
+                    <span>{matchTimings.get(matchId)!.overdueMinutes}m behind schedule</span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

@@ -9,15 +9,22 @@ import {
   Eye,
   Key,
   RefreshCw,
+  Play,
+  AlertTriangle,
 } from 'lucide-react';
 import { useTournament } from '../context/TournamentContext';
 import { useWakeLock } from '../hooks/useWakeLock';
+import { formatClockTime, formatDurationHuman } from '../utils/timing';
 
 export const Header: React.FC = () => {
   const {
     settings,
     toggleSound,
     masterSecondsRemaining,
+    tournamentClockStatus,
+    secondsUntilStart,
+    overtimeSeconds,
+    startTournamentNow,
     completedMatchesCount,
     totalGroupMatchesCount,
     isTournamentFinished,
@@ -84,26 +91,65 @@ export const Header: React.FC = () => {
 
           {/* Master Countdown Clock & Progress */}
           <div className="flex items-center gap-1.5 sm:gap-4">
-            <div className="bg-slate-100/90 border border-slate-200 rounded-xl px-2 py-1 sm:px-3 sm:py-1.5 flex items-center gap-1.5 sm:gap-2.5 shadow-xs">
-              <div className="flex items-center gap-1 text-xs text-slate-600">
-                <Clock className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
-                <span className="hidden md:inline font-semibold">Clock:</span>
-              </div>
-              <div className="font-mono text-xs sm:text-base font-bold text-slate-800 tracking-wider">
-                {formatMasterTime(masterSecondsRemaining)}
-              </div>
-              <div className="hidden lg:flex items-center gap-2 border-l border-slate-200 pl-3">
-                <div className="w-20 bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                  <div
-                    className="bg-emerald-600 h-full transition-all duration-500"
-                    style={{ width: `${progressPercent}%` }}
-                  />
+            {tournamentClockStatus === 'upcoming' ? (
+              <div className="bg-amber-50/90 border border-amber-200 rounded-xl px-2 py-1 sm:px-3 sm:py-1.5 flex items-center gap-1.5 sm:gap-2 shadow-xs">
+                <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse flex-shrink-0" />
+                <div className="flex flex-col sm:flex-row sm:items-center sm:gap-1.5 leading-tight">
+                  <span className="text-[11px] sm:text-xs font-black text-amber-900 tracking-tight">
+                    Starts at {formatClockTime(settings.tournamentStartTime)}
+                  </span>
+                  <span className="text-[10px] sm:text-xs font-mono font-bold text-amber-700">
+                    (in {formatDurationHuman(secondsUntilStart)})
+                  </span>
                 </div>
-                <span className="text-[11px] font-mono font-semibold text-slate-600">
-                  {completedMatchesCount}/{totalGroupMatchesCount}
+                {isCoach && (
+                  <button
+                    onClick={startTournamentNow}
+                    title="Start 3-Hour Tournament Clock Now"
+                    className="ml-1 px-2 py-0.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] sm:text-xs shadow-xs transition flex items-center gap-0.5"
+                  >
+                    <Play className="w-2.5 h-2.5 fill-white" />
+                    <span>Start Now</span>
+                  </button>
+                )}
+              </div>
+            ) : tournamentClockStatus === 'overtime' ? (
+              <div className="bg-rose-50 border border-rose-300 rounded-xl px-2.5 py-1 sm:px-3 sm:py-1.5 flex items-center gap-1.5 sm:gap-2 shadow-xs animate-pulse">
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-rose-800 hidden xs:inline">
+                    Overtime:
+                  </span>
+                  <span className="font-mono text-xs sm:text-base font-black text-rose-700 tracking-wider">
+                    +{formatMasterTime(overtimeSeconds)}
+                  </span>
+                </div>
+                <span className="text-[9px] font-black uppercase text-rose-800 bg-rose-100 border border-rose-200 px-1.5 py-0.2 rounded">
+                  Over 3h
                 </span>
               </div>
-            </div>
+            ) : (
+              <div className="bg-slate-100/90 border border-slate-200 rounded-xl px-2 py-1 sm:px-3 sm:py-1.5 flex items-center gap-1.5 sm:gap-2.5 shadow-xs">
+                <div className="flex items-center gap-1 text-xs text-slate-600">
+                  <Clock className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+                  <span className="hidden md:inline font-semibold">Clock:</span>
+                </div>
+                <div className="font-mono text-xs sm:text-base font-bold text-slate-800 tracking-wider">
+                  {formatMasterTime(masterSecondsRemaining)}
+                </div>
+                <div className="hidden lg:flex items-center gap-2 border-l border-slate-200 pl-3">
+                  <div className="w-20 bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="bg-emerald-600 h-full transition-all duration-500"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                  <span className="text-[11px] font-mono font-semibold text-slate-600">
+                    {completedMatchesCount}/{totalGroupMatchesCount}
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Champion Banner if won */}
             {isTournamentFinished && championTeam && (

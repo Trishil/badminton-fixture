@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Download,
   Lock,
+  AlertTriangle,
 } from 'lucide-react';
 import { Match, GroupId } from '../../types/tournament';
 import { useTournament } from '../../context/TournamentContext';
@@ -14,16 +15,29 @@ import { EditMatchModal } from '../modals/EditMatchModal';
 import { exportFixturesToCSV } from '../../utils/export';
 
 export const ScheduleView: React.FC = () => {
-  const { matches, teams, dispatchToCourt, isCoach, setShowAuthModal } = useTournament();
+  const { matches, teams, dispatchToCourt, isCoach, setShowAuthModal, matchTimings } =
+    useTournament();
 
   const [courtFilter, setCourtFilter] = useState<'all' | '1' | '2'>('all');
   const [poolFilter, setPoolFilter] = useState<'all' | GroupId>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'live_upcoming' | 'completed'>('all');
+  const [statusFilter, setStatusFilter] = useState<
+    'all' | 'live_upcoming' | 'completed' | 'delayed'
+  >('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
 
   // Helper map for team names
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
+
+  // Count overdue matches
+  const overdueCount = useMemo(() => {
+    let count = 0;
+    matches.forEach((m) => {
+      const timing = matchTimings.get(m.matchId);
+      if (timing?.isOverdue) count++;
+    });
+    return count;
+  }, [matches, matchTimings]);
 
   // Filter matches
   const filteredMatches = useMemo(() => {
@@ -38,6 +52,10 @@ export const ScheduleView: React.FC = () => {
       // Status filter
       if (statusFilter === 'completed' && m.status !== 'completed') return false;
       if (statusFilter === 'live_upcoming' && m.status === 'completed') return false;
+      if (statusFilter === 'delayed') {
+        const timing = matchTimings.get(m.matchId);
+        if (!timing?.isOverdue && !timing?.isLateStarting) return false;
+      }
 
       // Search query
       if (searchQuery.trim()) {
@@ -75,7 +93,7 @@ export const ScheduleView: React.FC = () => {
         </div>
 
         <button
-          onClick={() => exportFixturesToCSV(matches, teams)}
+          onClick={() => exportFixturesToCSV(matches, teams, matchTimings)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 transition self-start sm:self-auto"
         >
           <Download className="w-3.5 h-3.5 text-emerald-600" />
@@ -132,7 +150,9 @@ export const ScheduleView: React.FC = () => {
             <button
               onClick={() => setStatusFilter('all')}
               className={`px-2.5 py-1 rounded-lg font-semibold transition ${
-                statusFilter === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                statusFilter === 'all'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               All Status
@@ -140,7 +160,9 @@ export const ScheduleView: React.FC = () => {
             <button
               onClick={() => setStatusFilter('live_upcoming')}
               className={`px-2.5 py-1 rounded-lg font-semibold transition ${
-                statusFilter === 'live_upcoming' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                statusFilter === 'live_upcoming'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Live / Upcoming
@@ -148,10 +170,36 @@ export const ScheduleView: React.FC = () => {
             <button
               onClick={() => setStatusFilter('completed')}
               className={`px-2.5 py-1 rounded-lg font-semibold transition ${
-                statusFilter === 'completed' ? 'bg-slate-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                statusFilter === 'completed'
+                  ? 'bg-slate-700 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Completed
+            </button>
+            <button
+              onClick={() => setStatusFilter('delayed')}
+              className={`px-2.5 py-1 rounded-lg font-semibold transition flex items-center gap-1 ${
+                statusFilter === 'delayed'
+                  ? 'bg-rose-600 text-white shadow-xs font-bold'
+                  : overdueCount > 0
+                  ? 'text-rose-700 bg-rose-50 hover:bg-rose-100 font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <AlertTriangle className="w-3 h-3 text-current" />
+              <span>Delayed</span>
+              {overdueCount > 0 && (
+                <span
+                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                    statusFilter === 'delayed'
+                      ? 'bg-white text-rose-700'
+                      : 'bg-rose-200 text-rose-900'
+                  }`}
+                >
+                  {overdueCount}
+                </span>
+              )}
             </button>
           </div>
 
@@ -184,6 +232,7 @@ export const ScheduleView: React.FC = () => {
             const nameB = teamMap.get(m.teamB_id) || m.teamB_id;
             const isWinnerA = m.winnerId === m.teamA_id;
             const isWinnerB = m.winnerId === m.teamB_id;
+            const timing = matchTimings.get(m.matchId);
 
             return (
               <div
@@ -198,6 +247,8 @@ export const ScheduleView: React.FC = () => {
                 } shadow-xs hover:shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                   m.status === 'live'
                     ? 'bg-emerald-50/70 border-emerald-300 ring-2 ring-emerald-500/20'
+                    : timing?.isOverdue
+                    ? 'bg-rose-50/30 border-rose-300 ring-1 ring-rose-400/40'
                     : m.status === 'completed'
                     ? 'bg-white border-slate-200'
                     : 'bg-white border-slate-200/90'
@@ -215,15 +266,24 @@ export const ScheduleView: React.FC = () => {
                       <span className="text-slate-300">•</span>
                       <span className="text-xs text-slate-500">Round {m.round}</span>
                     </div>
-                    <span
-                      className={`text-[10px] font-bold px-1.5 py-0.2 rounded uppercase w-fit mt-0.5 ${
-                        m.court === 1
-                          ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                          : 'bg-purple-50 text-purple-700 border border-purple-200'
-                      }`}
-                    >
-                      Court {m.court}
-                    </span>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span
+                        className={`text-[10px] font-bold px-1.5 py-0.2 rounded uppercase ${
+                          m.court === 1
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : 'bg-purple-50 text-purple-700 border border-purple-200'
+                        }`}
+                      >
+                        Court {m.court}
+                      </span>
+
+                      {/* Estimated Slot Time Badge */}
+                      {timing && (
+                        <span className="text-[10px] sm:text-[11px] font-mono font-bold text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                          {timing.formattedTimeWindow}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -271,8 +331,22 @@ export const ScheduleView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Status Pill & Edit Trigger */}
-                <div className="flex items-center justify-between sm:justify-end gap-2 flex-shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
+                {/* Status Pill, Overdue Alert, & Edit Trigger */}
+                <div className="flex flex-wrap items-center justify-between sm:justify-end gap-1.5 sm:gap-2 flex-shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
+                  {/* Overdue / Late Warning Badge */}
+                  {timing?.isOverdue && (
+                    <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 animate-pulse shadow-xs">
+                      <AlertTriangle className="w-3 h-3 text-rose-600" />
+                      <span>{timing.overdueMinutes}m Overdue (Ended {timing.formattedEndTime})</span>
+                    </span>
+                  )}
+                  {!timing?.isOverdue && timing?.isLateStarting && (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-[10px] font-bold flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-amber-600" />
+                      <span>{timing.lateMinutes}m Late Starting</span>
+                    </span>
+                  )}
+
                   {m.status === 'live' ? (
                     <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-black uppercase tracking-wider flex items-center gap-1">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping" />

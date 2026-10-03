@@ -66,15 +66,19 @@ export interface CourtTimerState {
 }
 
 export interface TournamentSettings {
-  tournamentStartTime: number; // timestamp when tournament began
+  tournamentStartTime: number; // timestamp when tournament begins (defaults to 2:00 PM today)
+  isTournamentStarted?: boolean; // whether coach or time has started the master clock
   targetDurationMinutes: number; // 180 min (3 hours)
   matchTargetDurationMinutes: number; // 7 min
+  matchSlotMinutes?: number; // 8 min (7 min game + 1 min buffer)
   pointsToWin: number; // 5
   suddenDeathAt: number; // 4
   knockoutMode: KnockoutMode;
   soundEnabled: boolean;
 }
 
+export type TournamentClockStatus = 'upcoming' | 'running' | 'overtime';
 export type UserRole = 'coach' | 'spectator';
 export type CloudSyncStatus = 'synced' | 'syncing' | 'offline' | 'error';
+
 

@@ -10,8 +10,14 @@ import {
   KnockoutMode,
   UserRole,
   CloudSyncStatus,
+  TournamentClockStatus,
 } from '../types/tournament';
 import { DEFAULT_TEAMS, PRO_PAIRS_PRESET, DEFAULT_SETTINGS } from '../utils/initialData';
+import {
+  getToday2PMTimestamp,
+  calculateMatchTimings,
+  MatchTimingInfo,
+} from '../utils/timing';
 import { generateGroupMatches } from '../utils/scheduler';
 import { calculateAllStandings } from '../utils/standings';
 import { initializeKnockoutMatches, resolveKnockoutSeeds } from '../utils/knockout';
@@ -60,10 +66,17 @@ interface TournamentContextType {
   court2Match: Match | KnockoutMatch | null;
   court2UpNext: Match | KnockoutMatch | null;
 
-  // Timers
+  // Timers & Tournament Clock
   court1Timer: CourtTimerHook;
   court2Timer: CourtTimerHook;
   masterSecondsRemaining: number;
+  tournamentClockStatus: TournamentClockStatus;
+  secondsUntilStart: number;
+  overtimeSeconds: number;
+  startTournamentNow: () => void;
+  setTournamentStartTime: (newStartTimeMs: number) => void;
+  resetTournamentClock: () => void;
+  matchTimings: Map<string, MatchTimingInfo>;
 
   // Actions
   updateScore: (matchId: string, team: 'A' | 'B', delta: number) => void;
@@ -200,12 +213,73 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [c2Running, setC2Running] = useState<boolean>(false);
   const c2WarningBeeped = useRef<boolean>(false);
 
-  // Tournament Master 3-hour timer
-  const [masterSecondsRemaining, setMasterSecondsRemaining] = useState<number>(() => {
-    const elapsedSeconds = Math.floor((Date.now() - settings.tournamentStartTime) / 1000);
+  // 1-second clock heartbeat for live master clock, overdue alerts, and time formatting
+  const [currentClockTime, setCurrentClockTime] = useState<number>(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentClockTime(Date.now());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Determine current tournament clock status
+  const tournamentClockStatus = useMemo<TournamentClockStatus>(() => {
+    const isStarted = Boolean(settings.isTournamentStarted) || currentClockTime >= settings.tournamentStartTime;
+    if (!isStarted) return 'upcoming';
+
+    const totalDurationMs = settings.targetDurationMinutes * 60 * 1000;
+    const elapsedMs = currentClockTime - settings.tournamentStartTime;
+    if (elapsedMs > totalDurationMs) return 'overtime';
+    return 'running';
+  }, [currentClockTime, settings.isTournamentStarted, settings.tournamentStartTime, settings.targetDurationMinutes]);
+
+  // Seconds until tournament start time (0 if already started)
+  const secondsUntilStart = useMemo(() => {
+    if (settings.isTournamentStarted || currentClockTime >= settings.tournamentStartTime) return 0;
+    return Math.max(0, Math.floor((settings.tournamentStartTime - currentClockTime) / 1000));
+  }, [currentClockTime, settings.isTournamentStarted, settings.tournamentStartTime]);
+
+  // Tournament Master 3-hour timer: does NOT tick down before tournament start time!
+  const masterSecondsRemaining = useMemo(() => {
+    const isStarted = Boolean(settings.isTournamentStarted) || currentClockTime >= settings.tournamentStartTime;
+    if (!isStarted) {
+      // Tournament hasn't started yet! Keep full 3-hour match window intact.
+      return settings.targetDurationMinutes * 60;
+    }
+    const elapsedSeconds = Math.floor((currentClockTime - settings.tournamentStartTime) / 1000);
     const totalDurationSeconds = settings.targetDurationMinutes * 60;
     return Math.max(0, totalDurationSeconds - elapsedSeconds);
-  });
+  }, [currentClockTime, settings.isTournamentStarted, settings.tournamentStartTime, settings.targetDurationMinutes]);
+
+  // Overtime seconds if tournament exceeds 3 hours
+  const overtimeSeconds = useMemo(() => {
+    const isStarted = Boolean(settings.isTournamentStarted) || currentClockTime >= settings.tournamentStartTime;
+    if (!isStarted) return 0;
+    const elapsedSeconds = Math.floor((currentClockTime - settings.tournamentStartTime) / 1000);
+    const totalDurationSeconds = settings.targetDurationMinutes * 60;
+    if (elapsedSeconds > totalDurationSeconds) {
+      return elapsedSeconds - totalDurationSeconds;
+    }
+    return 0;
+  }, [currentClockTime, settings.isTournamentStarted, settings.tournamentStartTime, settings.targetDurationMinutes]);
+
+  // Pre-calculate timing windows and delay/overdue indicators for all fixtures
+  const matchTimings = useMemo(() => {
+    return calculateMatchTimings(
+      matches,
+      settings.tournamentStartTime,
+      settings.matchSlotMinutes || 8,
+      settings.matchTargetDurationMinutes || 7,
+      currentClockTime
+    );
+  }, [
+    matches,
+    settings.tournamentStartTime,
+    settings.matchSlotMinutes,
+    settings.matchTargetDurationMinutes,
+    currentClockTime,
+  ]);
 
   // Calculate Standings dynamically
   const standings = useMemo(() => {
@@ -216,16 +290,6 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     setKnockoutMatches((prev) => resolveKnockoutSeeds(prev, standings, settings.knockoutMode));
   }, [standings, settings.knockoutMode]);
-
-  // Master Clock interval
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const elapsedSeconds = Math.floor((Date.now() - settings.tournamentStartTime) / 1000);
-      const totalDurationSeconds = settings.targetDurationMinutes * 60;
-      setMasterSecondsRemaining(Math.max(0, totalDurationSeconds - elapsedSeconds));
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [settings.tournamentStartTime, settings.targetDurationMinutes]);
 
   // Court 1 Timer loop
   useEffect(() => {
@@ -1012,6 +1076,54 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return teams.filter((t) => losers.includes(t.id));
   }, [knockoutMatches, teams]);
 
+  // Tournament Clock Controls
+  const startTournamentNow = useCallback(() => {
+    if (!isCoach) {
+      setShowAuthModal(true);
+      return;
+    }
+    const now = Date.now();
+    const updatedSettings: TournamentSettings = {
+      ...settings,
+      tournamentStartTime: now,
+      isTournamentStarted: true,
+    };
+    setSettings(updatedSettings);
+    syncToCloud({ settings: updatedSettings });
+  }, [isCoach, settings, syncToCloud]);
+
+  const setTournamentStartTime = useCallback(
+    (newStartTimeMs: number) => {
+      if (!isCoach) {
+        setShowAuthModal(true);
+        return;
+      }
+      const updatedSettings: TournamentSettings = {
+        ...settings,
+        tournamentStartTime: newStartTimeMs,
+        isTournamentStarted: Date.now() >= newStartTimeMs,
+      };
+      setSettings(updatedSettings);
+      syncToCloud({ settings: updatedSettings });
+    },
+    [isCoach, settings, syncToCloud]
+  );
+
+  const resetTournamentClock = useCallback(() => {
+    if (!isCoach) {
+      setShowAuthModal(true);
+      return;
+    }
+    const today2PM = getToday2PMTimestamp();
+    const updatedSettings: TournamentSettings = {
+      ...settings,
+      tournamentStartTime: today2PM,
+      isTournamentStarted: false,
+    };
+    setSettings(updatedSettings);
+    syncToCloud({ settings: updatedSettings });
+  }, [isCoach, settings, syncToCloud]);
+
   const value: TournamentContextType = {
     teams,
     matches,
@@ -1027,6 +1139,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     court1Timer,
     court2Timer,
     masterSecondsRemaining,
+    tournamentClockStatus,
+    secondsUntilStart,
+    overtimeSeconds,
+    startTournamentNow,
+    setTournamentStartTime,
+    resetTournamentClock,
+    matchTimings,
     updateScore,
     quickFinishMatch,
     finishAndAdvanceMatch,

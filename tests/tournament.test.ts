@@ -4,6 +4,7 @@ import { generateGroupMatches } from '../src/utils/scheduler.ts';
 import { calculateGroupStandings } from '../src/utils/standings.ts';
 import { initializeKnockoutMatches, resolveKnockoutSeeds } from '../src/utils/knockout.ts';
 import { Match, GroupStanding } from '../src/types/tournament.ts';
+import { calculateMatchTimings, formatClockTime, formatDurationHuman, getToday2PMTimestamp } from '../src/utils/timing.ts';
 
 console.log('🧪 RUNNING TOURNAMENT OPERATIONS TEST SUITE...\n');
 
@@ -193,5 +194,68 @@ console.log('Test 4: Team Rest Intervals on Court');
 
 console.log('  ✅ Guaranteed rest intervals validated: Every team rests at least 3 full matches (~25-35 min) on court between games.\n');
 
+// ==========================================
+// TEST 5: Match Timing, Parallel Spacing & Delay Calculations
+// ==========================================
+console.log('Test 5: Match Timing, Parallel Spacing & Delay Calculations');
+
+const baseTime = new Date(2026, 9, 4, 14, 0, 0, 0).getTime(); // 2:00:00 PM
+const slotMinutes = 8;
+const matchDurationMinutes = 7;
+const nowSimulated = baseTime + 25 * 60 * 1000; // 2:25 PM
+
+const timings = calculateMatchTimings(matches, baseTime, slotMinutes, matchDurationMinutes, nowSimulated);
+
+assert.strictEqual(timings.size, matches.length, 'Every match must have a computed timing entry');
+
+// Check Court 1 match 0: start at 2:00 PM, end at 2:07 PM
+const court1_m0 = matches.find((m) => m.court === 1)!;
+const timing_c1_m0 = timings.get(court1_m0.matchId)!;
+assert.strictEqual(timing_c1_m0.formattedStartTime, '2:00 PM', 'First match on Court 1 should start at 2:00 PM');
+assert.strictEqual(timing_c1_m0.formattedEndTime, '2:07 PM', 'First match on Court 1 should end at 2:07 PM (7-min game)');
+assert.strictEqual(timing_c1_m0.formattedTimeWindow, '2:00 PM – 2:07 PM');
+
+// Check Court 2 match 0 (runs in parallel!)
+const court2_m0 = matches.find((m) => m.court === 2)!;
+const timing_c2_m0 = timings.get(court2_m0.matchId)!;
+assert.strictEqual(timing_c2_m0.formattedStartTime, '2:00 PM', 'First match on Court 2 should also start at 2:00 PM (parallel)');
+assert.strictEqual(timing_c2_m0.formattedEndTime, '2:07 PM');
+
+// Check Court 1 match 1: should be 8 minutes later (2:08 PM - 2:15 PM)
+const court1MatchesAll = matches.filter((m) => m.court === 1);
+const court1_m1 = court1MatchesAll[1];
+const timing_c1_m1 = timings.get(court1_m1.matchId)!;
+assert.strictEqual(timing_c1_m1.formattedStartTime, '2:08 PM');
+assert.strictEqual(timing_c1_m1.formattedEndTime, '2:15 PM');
+
+// Check Court 1 match 2: should be 16 minutes later (2:16 PM - 2:23 PM)
+const court1_m2 = court1MatchesAll[2];
+const timing_c1_m2 = timings.get(court1_m2.matchId)!;
+assert.strictEqual(timing_c1_m2.formattedStartTime, '2:16 PM');
+assert.strictEqual(timing_c1_m2.formattedEndTime, '2:23 PM');
+
+// At 2:25 PM:
+// c1_m0 (ended at 2:07 PM) is scheduled (uncompleted) -> it should be overdue by 18 minutes!
+assert.strictEqual(timing_c1_m0.isOverdue, true, 'Match 0 should be overdue at 2:25 PM if still uncompleted');
+assert.strictEqual(timing_c1_m0.overdueMinutes, 18, 'Match 0 should be overdue by exactly 18 minutes');
+
+// c1_m2 (ended at 2:23 PM) is scheduled -> overdue by 2 minutes
+assert.strictEqual(timing_c1_m2.isOverdue, true, 'Match 2 should be overdue at 2:25 PM');
+assert.strictEqual(timing_c1_m2.overdueMinutes, 2);
+
+// Check completed match: If c1_m0 had status 'completed', it must NOT be overdue
+const matchesWithCompleted = matches.map((m) =>
+  m.matchId === court1_m0.matchId ? { ...m, status: 'completed' as const } : m
+);
+const timingsWithCompleted = calculateMatchTimings(matchesWithCompleted, baseTime, slotMinutes, matchDurationMinutes, nowSimulated);
+assert.strictEqual(timingsWithCompleted.get(court1_m0.matchId)!.isOverdue, false, 'Completed match must not be flagged overdue');
+
+// Helper formatters
+assert.strictEqual(formatDurationHuman(120), '2m');
+assert.strictEqual(formatDurationHuman(3660), '1h 1m');
+
+console.log('  ✅ Timing engine verified: 8-minute parallel court spacing, 7-minute match windows, and exact overdue tracking.\n');
+
 console.log('🎉 ALL UNIT TESTS PASSED SUCCESSFULLY! 100% OPERATIONAL.\n');
+
 

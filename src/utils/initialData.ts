@@ -60,10 +60,14 @@ export const PRO_PAIRS_PRESET: Array<{ id: string; name: string; group: GroupId 
   { id: 'T20', name: 'Team 20', group: 'D' },
 ];
 
+import { getToday2PMTimestamp } from './timing';
+
 export const DEFAULT_SETTINGS: TournamentSettings = {
-  tournamentStartTime: Date.now(),
+  tournamentStartTime: getToday2PMTimestamp(), // Today at 2:00 PM
+  isTournamentStarted: false,
   targetDurationMinutes: 180, // 3 hours total tournament window
   matchTargetDurationMinutes: 7, // 7 min countdown
+  matchSlotMinutes: 8, // 8 min slot (7 min match + 1 min turnaround)
   pointsToWin: 5,
   suddenDeathAt: 4,
   knockoutMode: 'top1_semis',

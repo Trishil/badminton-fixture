@@ -51,13 +51,31 @@ export function exportStandingsToCSV(
   downloadFile(rows.join('\n'), filename, 'text/csv;charset=utf-8;');
 }
 
+import { MatchTimingInfo } from './timing';
+
 export function exportFixturesToCSV(
   matches: Match[],
   teams: Team[],
+  timingMap?: Map<string, MatchTimingInfo>,
   filename = 'badminton_fixtures.csv'
 ): void {
   const teamMap = new Map(teams.map((t) => [t.id, t.name]));
-  const headers = ['Match ID', 'Number', 'Stage', 'Pool', 'Court', 'Round', 'Team A', 'Team B', 'Score A', 'Score B', 'Status', 'Winner'];
+  const headers = [
+    'Match ID',
+    'Number',
+    'Stage',
+    'Pool',
+    'Court',
+    'Round',
+    'Est. Time Window',
+    'Team A',
+    'Team B',
+    'Score A',
+    'Score B',
+    'Status',
+    'Winner',
+    'Delay Status',
+  ];
 
   const rows: string[] = [headers.join(',')];
 
@@ -65,6 +83,13 @@ export function exportFixturesToCSV(
     const nameA = `"${(teamMap.get(m.teamA_id) || m.teamA_id).replace(/"/g, '""')}"`;
     const nameB = `"${(teamMap.get(m.teamB_id) || m.teamB_id).replace(/"/g, '""')}"`;
     const winnerName = m.winnerId ? `"${(teamMap.get(m.winnerId) || m.winnerId).replace(/"/g, '""')}"` : '""';
+    const timing = timingMap?.get(m.matchId);
+    const timeWindow = timing ? `"${timing.formattedTimeWindow}"` : '""';
+    const delayStatus = timing?.isOverdue
+      ? `"${timing.overdueMinutes}m Overdue (Ended ${timing.formattedEndTime})"`
+      : timing?.isLateStarting
+      ? `"${timing.lateMinutes}m Late Starting"`
+      : '""';
 
     rows.push([
       m.matchId,
@@ -73,12 +98,14 @@ export function exportFixturesToCSV(
       m.group,
       m.court,
       m.round,
+      timeWindow,
       nameA,
       nameB,
       m.scoreA,
       m.scoreB,
       m.status,
       winnerName,
+      delayStatus,
     ].join(','));
   });
 
