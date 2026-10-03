@@ -24,6 +24,7 @@ export const AdminView: React.FC = () => {
     settings,
     updateTeamName,
     loadStarPlayers,
+    loadGroundTeams,
     simulateRemainingGroupMatches,
     importTournamentJSON,
   } = useTournament();
@@ -81,6 +82,15 @@ export const AdminView: React.FC = () => {
 
         {/* Quick Actions */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={loadGroundTeams}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 text-xs font-bold border border-blue-200 transition"
+            title="Load your 15 Tournament Ground Teams"
+          >
+            <Users className="w-3.5 h-3.5 text-blue-600" />
+            <span>Load Ground Teams</span>
+          </button>
+
           <button
             onClick={loadStarPlayers}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold border border-amber-200 transition"

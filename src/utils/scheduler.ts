@@ -1,24 +1,40 @@
 import { Match, GroupId, Team } from '../types/tournament';
 
-// Berger pairing indices (1-indexed team indices in 5-team group)
-// 5 rounds, 2 matches per round
-const GROUP_ROUND_PAIRINGS: [number, number][][] = [
-  // Round 1 (Team 5 bye)
-  [[1, 4], [2, 3]],
-  // Round 2 (Team 4 bye)
-  [[5, 3], [1, 2]],
-  // Round 3 (Team 3 bye)
-  [[4, 2], [5, 1]],
-  // Round 4 (Team 2 bye)
-  [[3, 1], [4, 5]],
-  // Round 5 (Team 1 bye)
-  [[2, 5], [3, 4]],
+/**
+ * Optimal 10-match round-robin sequence for a 5-team pool (1-indexed).
+ *
+ * Team appearance indices in pool sequence:
+ * - Team 1: [0, 2, 5, 8] -> pool gaps: 2, 3, 3
+ * - Team 2: [0, 3, 6, 9] -> pool gaps: 3, 3, 3
+ * - Team 3: [1, 3, 5, 7] -> pool gaps: 2, 2, 2
+ * - Team 4: [1, 4, 6, 8] -> pool gaps: 3, 2, 2
+ * - Team 5: [2, 4, 7, 9] -> pool gaps: 2, 3, 2
+ *
+ * Every team has at least 1 intervening pool match (pool gap >= 2).
+ * When interleaved on court with another pool (Pool A alternating with Pool C on Court 1),
+ * the court interval is at least 4 matches!
+ * That guarantees a minimum of 3 full matches (approx. 21 to 35 minutes) of rest
+ * between every appearance for every single team.
+ */
+const OPTIMAL_ROUND_ROBIN_PAIRS: [number, number][] = [
+  [1, 2],
+  [3, 4],
+  [1, 5],
+  [2, 3],
+  [4, 5],
+  [1, 3],
+  [2, 4],
+  [3, 5],
+  [1, 4],
+  [2, 5],
 ];
 
 /**
- * Generates all 40 group stage matches interleaved across Court 1 and Court 2
- * Court 1 hosts alternating Pool A and Pool C matches
- * Court 2 hosts alternating Pool B and Pool D matches
+ * Generates all 40 group stage matches with guaranteed rest intervals.
+ * - Court 1 hosts alternating Pool A and Pool C matches.
+ * - Court 2 hosts alternating Pool B and Pool D matches.
+ * - Matches on Court 1 and Court 2 run in parallel time slots.
+ * - No team ever plays back-to-back or in the next match.
  */
 export function generateGroupMatches(teams: Team[]): Match[] {
   const getTeamsInGroup = (groupId: GroupId): Team[] => {
@@ -33,16 +49,14 @@ export function generateGroupMatches(teams: Team[]): Match[] {
   const matches: Match[] = [];
   let globalMatchCounter = 1;
 
-  // We iterate through all 5 rounds
-  for (let rIndex = 0; rIndex < 5; rIndex++) {
-    const roundNumber = rIndex + 1;
-    const pairings = GROUP_ROUND_PAIRINGS[rIndex];
+  for (let slot = 0; slot < 10; slot++) {
+    const pair = OPTIMAL_ROUND_ROBIN_PAIRS[slot];
+    const roundNumber = Math.floor(slot / 2) + 1; // Rounds 1 to 5
 
-    // For Court 1: alternate Pool A and Pool C
-    // Pair 1 Pool A
-    const tA1_1 = poolA[pairings[0][0] - 1];
-    const tA1_2 = poolA[pairings[0][1] - 1];
-    if (tA1_1 && tA1_2) {
+    // Court 1: Pool A match
+    const tA1 = poolA[pair[0] - 1];
+    const tA2 = poolA[pair[1] - 1];
+    if (tA1 && tA2) {
       matches.push({
         matchId: `M${globalMatchCounter}`,
         matchNumber: globalMatchCounter++,
@@ -51,8 +65,8 @@ export function generateGroupMatches(teams: Team[]): Match[] {
         group: 'A',
         stage: 'group',
         round: roundNumber,
-        teamA_id: tA1_1.id,
-        teamB_id: tA1_2.id,
+        teamA_id: tA1.id,
+        teamB_id: tA2.id,
         scoreA: 0,
         scoreB: 0,
         status: matches.length === 0 ? 'live' : 'scheduled',
@@ -60,74 +74,10 @@ export function generateGroupMatches(teams: Team[]): Match[] {
       });
     }
 
-    // Pair 1 Pool C (Court 1)
-    const tC1_1 = poolC[pairings[0][0] - 1];
-    const tC1_2 = poolC[pairings[0][1] - 1];
-    if (tC1_1 && tC1_2) {
-      matches.push({
-        matchId: `M${globalMatchCounter}`,
-        matchNumber: globalMatchCounter++,
-        court: 1,
-        courtAssigned: 1,
-        group: 'C',
-        stage: 'group',
-        round: roundNumber,
-        teamA_id: tC1_1.id,
-        teamB_id: tC1_2.id,
-        scoreA: 0,
-        scoreB: 0,
-        status: 'scheduled',
-        winnerId: null,
-      });
-    }
-
-    // Pair 2 Pool A (Court 1)
-    const tA2_1 = poolA[pairings[1][0] - 1];
-    const tA2_2 = poolA[pairings[1][1] - 1];
-    if (tA2_1 && tA2_2) {
-      matches.push({
-        matchId: `M${globalMatchCounter}`,
-        matchNumber: globalMatchCounter++,
-        court: 1,
-        courtAssigned: 1,
-        group: 'A',
-        stage: 'group',
-        round: roundNumber,
-        teamA_id: tA2_1.id,
-        teamB_id: tA2_2.id,
-        scoreA: 0,
-        scoreB: 0,
-        status: 'scheduled',
-        winnerId: null,
-      });
-    }
-
-    // Pair 2 Pool C (Court 1)
-    const tC2_1 = poolC[pairings[1][0] - 1];
-    const tC2_2 = poolC[pairings[1][1] - 1];
-    if (tC2_1 && tC2_2) {
-      matches.push({
-        matchId: `M${globalMatchCounter}`,
-        matchNumber: globalMatchCounter++,
-        court: 1,
-        courtAssigned: 1,
-        group: 'C',
-        stage: 'group',
-        round: roundNumber,
-        teamA_id: tC2_1.id,
-        teamB_id: tC2_2.id,
-        scoreA: 0,
-        scoreB: 0,
-        status: 'scheduled',
-        winnerId: null,
-      });
-    }
-
-    // For Court 2: alternate Pool B and Pool D
-    // Pair 1 Pool B
-    const tB1_1 = poolB[pairings[0][0] - 1];
-    const tB1_2 = poolB[pairings[0][1] - 1];
-    if (tB1_1 && tB1_2) {
+    // Court 2: Pool B match (runs simultaneously with Pool A on Court 1)
+    const tB1 = poolB[pair[0] - 1];
+    const tB2 = poolB[pair[1] - 1];
+    if (tB1 && tB2) {
       matches.push({
         matchId: `M${globalMatchCounter}`,
         matchNumber: globalMatchCounter++,
@@ -136,19 +86,40 @@ export function generateGroupMatches(teams: Team[]): Match[] {
         group: 'B',
         stage: 'group',
         round: roundNumber,
-        teamA_id: tB1_1.id,
-        teamB_id: tB1_2.id,
+        teamA_id: tB1.id,
+        teamB_id: tB2.id,
         scoreA: 0,
         scoreB: 0,
-        status: roundNumber === 1 && pairings[0][0] === 1 ? 'live' : 'scheduled',
+        status: matches.length === 1 ? 'live' : 'scheduled',
         winnerId: null,
       });
     }
 
-    // Pair 1 Pool D (Court 2)
-    const tD1_1 = poolD[pairings[0][0] - 1];
-    const tD1_2 = poolD[pairings[0][1] - 1];
-    if (tD1_1 && tD1_2) {
+    // Court 1: Pool C match
+    const tC1 = poolC[pair[0] - 1];
+    const tC2 = poolC[pair[1] - 1];
+    if (tC1 && tC2) {
+      matches.push({
+        matchId: `M${globalMatchCounter}`,
+        matchNumber: globalMatchCounter++,
+        court: 1,
+        courtAssigned: 1,
+        group: 'C',
+        stage: 'group',
+        round: roundNumber,
+        teamA_id: tC1.id,
+        teamB_id: tC2.id,
+        scoreA: 0,
+        scoreB: 0,
+        status: 'scheduled',
+        winnerId: null,
+      });
+    }
+
+    // Court 2: Pool D match (runs simultaneously with Pool C on Court 1)
+    const tD1 = poolD[pair[0] - 1];
+    const tD2 = poolD[pair[1] - 1];
+    if (tD1 && tD2) {
       matches.push({
         matchId: `M${globalMatchCounter}`,
         matchNumber: globalMatchCounter++,
@@ -157,50 +128,8 @@ export function generateGroupMatches(teams: Team[]): Match[] {
         group: 'D',
         stage: 'group',
         round: roundNumber,
-        teamA_id: tD1_1.id,
-        teamB_id: tD1_2.id,
-        scoreA: 0,
-        scoreB: 0,
-        status: 'scheduled',
-        winnerId: null,
-      });
-    }
-
-    // Pair 2 Pool B (Court 2)
-    const tB2_1 = poolB[pairings[1][0] - 1];
-    const tB2_2 = poolB[pairings[1][1] - 1];
-    if (tB2_1 && tB2_2) {
-      matches.push({
-        matchId: `M${globalMatchCounter}`,
-        matchNumber: globalMatchCounter++,
-        court: 2,
-        courtAssigned: 2,
-        group: 'B',
-        stage: 'group',
-        round: roundNumber,
-        teamA_id: tB2_1.id,
-        teamB_id: tB2_2.id,
-        scoreA: 0,
-        scoreB: 0,
-        status: 'scheduled',
-        winnerId: null,
-      });
-    }
-
-    // Pair 2 Pool D (Court 2)
-    const tD2_1 = poolD[pairings[1][0] - 1];
-    const tD2_2 = poolD[pairings[1][1] - 1];
-    if (tD2_1 && tD2_2) {
-      matches.push({
-        matchId: `M${globalMatchCounter}`,
-        matchNumber: globalMatchCounter++,
-        court: 2,
-        courtAssigned: 2,
-        group: 'D',
-        stage: 'group',
-        round: roundNumber,
-        teamA_id: tD2_1.id,
-        teamB_id: tD2_2.id,
+        teamA_id: tD1.id,
+        teamB_id: tD2.id,
         scoreA: 0,
         scoreB: 0,
         status: 'scheduled',
@@ -209,7 +138,7 @@ export function generateGroupMatches(teams: Team[]): Match[] {
     }
   }
 
-  // Ensure exactly one match is marked 'live' for Court 1 and Court 2
+  // Ensure exactly the first match on Court 1 and Court 2 is 'live'
   let foundCourt1Live = false;
   let foundCourt2Live = false;
   for (const m of matches) {

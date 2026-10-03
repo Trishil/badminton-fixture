@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'smashflow_badminton_tournament_v1';
+const STORAGE_KEY = 'smashflow_badminton_tournament_v2';
 
 export function loadTournamentFromStorage<T>(fallback: T): T {
   if (typeof window === 'undefined') return fallback;

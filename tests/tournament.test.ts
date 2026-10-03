@@ -164,4 +164,34 @@ assert.strictEqual(qf4.teamBId, 'T7', 'QF4 must be B2');
 
 console.log('  ✅ 8-Team Quarterfinals correctly seeded (A1 vs C2, B1 vs D2, C1 vs A2, D1 vs B2).\n');
 
+// ==========================================
+// TEST 4: Team Rest Intervals on Court
+// ==========================================
+console.log('Test 4: Team Rest Intervals on Court');
+// For each court, check the sequence of matches
+[1, 2].forEach((courtNum) => {
+  const courtMatches = matches.filter((m) => m.court === courtNum);
+  const teamPositions = new Map<string, number[]>();
+
+  courtMatches.forEach((m, idx) => {
+    for (const tid of [m.teamA_id, m.teamB_id]) {
+      if (!teamPositions.has(tid)) teamPositions.set(tid, []);
+      teamPositions.get(tid)!.push(idx);
+    }
+  });
+
+  teamPositions.forEach((indices, tid) => {
+    for (let k = 0; k < indices.length - 1; k++) {
+      const gap = indices[k + 1] - indices[k];
+      assert(
+        gap >= 4,
+        `Team ${tid} on Court ${courtNum} has insufficient rest interval of ${gap} matches (minimum required: 4)`
+      );
+    }
+  });
+});
+
+console.log('  ✅ Guaranteed rest intervals validated: Every team rests at least 3 full matches (~25-35 min) on court between games.\n');
+
 console.log('🎉 ALL UNIT TESTS PASSED SUCCESSFULLY! 100% OPERATIONAL.\n');
+

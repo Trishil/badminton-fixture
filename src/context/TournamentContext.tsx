@@ -67,6 +67,7 @@ interface TournamentContextType {
   dispatchToCourt: (matchId: string, court: 1 | 2) => void;
   updateTeamName: (teamId: string, newName: string) => void;
   loadStarPlayers: () => void;
+  loadGroundTeams: () => void;
   simulateRemainingGroupMatches: () => void;
   setKnockoutMode: (mode: KnockoutMode) => void;
   toggleSound: () => void;
@@ -581,7 +582,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Update Team Name
   const updateTeamName = useCallback((teamId: string, newName: string) => {
     setTeams((prev) =>
-      prev.map((t) => (t.id === teamId ? { ...t, name: newName.trim() } : t))
+      prev.map((t) => (t.id === teamId ? { ...t, name: newName } : t))
     );
   }, []);
 
@@ -593,6 +594,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return found ? { ...t, name: found.name } : t;
       })
     );
+  }, []);
+
+  // Load Ground Tournament Teams
+  const loadGroundTeams = useCallback(() => {
+    setTeams(DEFAULT_TEAMS);
   }, []);
 
   // Fast Simulate Remaining Group Stage Matches
@@ -726,6 +732,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     dispatchToCourt,
     updateTeamName,
     loadStarPlayers,
+    loadGroundTeams,
     simulateRemainingGroupMatches,
     setKnockoutMode,
     toggleSound,
